@@ -38,12 +38,20 @@ const firebaseConfig = {
   appId: "1:380134454141:web:0a7061e369bcd5c86f1214",
 };
 
-// True once the config above has actually been filled in. The sign-in screen uses this
-// to show a clear "not configured yet" message instead of letting Firebase fail with an
+// True once the config above is a real, usable project config. The sign-in screen uses this
+// to show a clear "not connected yet" message instead of letting Firebase fail with an
 // opaque auth/invalid-api-key error.
-export const isFirebaseConfigured = !Object.values(firebaseConfig).some((v) =>
-  String(v).includes("PLACEHOLDER")
-);
+//
+// This used to look for the string "PLACEHOLDER", which no longer occurs anywhere in the
+// block above — so the check was always true and the sign-in banner was unreachable. It now
+// checks the two things a fork actually gets wrong: a blanked-out value, and an apiKey that
+// isn't a Firebase browser key. Google mints those as "AIza" + 35 chars of URL-safe base64;
+// anything else (an empty string, "YOUR_API_KEY", a service-account key) cannot authenticate,
+// so failing early with an explanation beats failing late with an SDK error code.
+const FIREBASE_WEB_API_KEY = /^AIza[0-9A-Za-z_-]{35}$/;
+export const isFirebaseConfigured =
+  Object.values(firebaseConfig).every((v) => typeof v === "string" && v.trim() !== "") &&
+  FIREBASE_WEB_API_KEY.test(firebaseConfig.apiKey);
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

@@ -24,4 +24,12 @@ export default [
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
     },
   },
+  {
+    // The rules suite is Node, not a browser, and it is not React. `useRulesHarness()` is a
+    // Vitest lifecycle helper whose name happens to match the hook convention, so the
+    // rules-of-hooks check fires on a file that has never seen a component.
+    files: ["tests/rules/**/*.js"],
+    languageOptions: { globals: { ...globals.node } },
+    rules: { "react-hooks/rules-of-hooks": "off" },
+  },
 ];

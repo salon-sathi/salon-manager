@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from "vitest";
 // ships green and only explodes in the browser. This file evaluates the real module graph.
 //
 // Firebase is stubbed: importing the app reaches src/lib/firebase.js, which would otherwise
-// call initializeApp() with the placeholder config and try to open a network connection.
+// call initializeApp() with the committed project config and try to open a network connection.
 vi.mock("./lib/firebase.js", () => ({
   app: {},
   auth: {},

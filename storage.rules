@@ -1,5 +1,25 @@
 rules_version = '2';
 
+// ============================================================================
+//  ⚠⚠⚠  DEPLOY WILL NOT WORK UNTIL YOU EDIT THIS  ⚠⚠⚠
+//
+//  The owner allowlist below still contains the literal placeholder
+//  'OWNER_EMAIL_1'. Deployed as-is, NOBODY matches it, so every vendor-bill
+//  proof upload and every attempt to open one fails with
+//  storage/unauthorized — which presents in the app as "Upload failed",
+//  not as "you forgot to edit a rules file".
+//
+//  1. Replace 'OWNER_EMAIL_1' in isOwner() below with the owner's SIGN-IN
+//     EMAIL. Two owners? Add the second: ['a@x.com', 'b@x.com'].
+//  2. Deploy:
+//         firebase deploy --only storage
+//     (or both rule files at once:  firebase deploy --only database,storage)
+//  3. Sign in as that owner and attach a proof to a vendor bill to confirm.
+//
+//  Nothing else in this file needs an email. Customer receipts and the
+//  catch-all deny below are role-free.
+// ============================================================================
+//
 // Firebase Storage holds vendor-bill proof files under shop/bills/<billId>/<file>
 // (see src/lib/bills.js). The Firebase config is public, so these rules are the gate.
 //
@@ -13,21 +33,21 @@ rules_version = '2';
 //
 // Vendor bills are owner-only anyway, so an email allowlist costs nothing in
 // practice: the set of people allowed to touch proofs is exactly {the owner}.
-// If you add a second owner, add their email to the list below too.
-//
-// SETUP (do this once):
-//   1. Replace OWNER_EMAIL below with the owner's sign-in email.
-//      For more than one owner, use:
-//        request.auth.token.email in ['a@x.com', 'b@x.com']
-//   2. Deploy:  firebase deploy --only storage
 service firebase.storage {
   match /b/{bucket}/o {
+    // ---- THE OWNER ALLOWLIST — the one line you must edit ------------------
+    // This is the whole configuration surface of this file. Every rule that
+    // needs "is this the owner?" calls isOwner(); no email appears anywhere
+    // else, so there is exactly one place to get wrong.
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email in ['OWNER_EMAIL_1'];
+    }
+
     // Vendor-bill proofs: owner-only, and capped at 10 MB to match MAX_PROOF_BYTES.
     match /shop/bills/{billId}/{fileName} {
-      allow read: if request.auth != null
-        && request.auth.token.email == 'OWNER_EMAIL';
-      allow write: if request.auth != null
-        && request.auth.token.email == 'OWNER_EMAIL'
+      allow read: if isOwner();
+      allow write: if isOwner()
         && request.resource.size < 10 * 1024 * 1024;
     }
 
@@ -40,10 +60,10 @@ service firebase.storage {
     // deliberately kept out of it. Somebody holding a link sees that one bill; nobody can
     // enumerate or guess a second one.
     //
-    // Writing is staff-only (any signed-in user, not the owner allowlist used for vendor
-    // bills above): a biller who can ring up a sale and print it must also be able to send
-    // the customer their copy. Capped at 2 MB — a 72mm receipt JPEG is ~20-60 KB, so anything
-    // near the cap is a bug or an upload that isn't a receipt.
+    // Writing is staff-only (any signed-in user, NOT the owner allowlist used for vendor
+    // bills above — deliberately not isOwner()): a biller who can ring up a sale and print it
+    // must also be able to send the customer their copy. Capped at 2 MB — a 72mm receipt JPEG
+    // is ~20-60 KB, so anything near the cap is a bug or an upload that isn't a receipt.
     match /shop/receipts/{saleId}/{fileName} {
       allow read: if true;
       allow write: if request.auth != null

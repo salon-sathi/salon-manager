@@ -52,9 +52,12 @@ layout that works on the phone at the counter.
 
 ## ⚠ Before it will run: connect a Firebase project
 
-This repository ships with a **placeholder Firebase config**. Sign-in and sync are inactive
-until you connect your own project — the sign-in screen says so plainly rather than failing
-with a cryptic SDK error.
+[`src/lib/firebase.js`](src/lib/firebase.js) contains a **real, committed config** — it points
+at the author's project, `salon-manager-49a88`. That is deliberate (a Firebase web config is
+public by design; it identifies a project, it does not grant access to it), and it is **not
+usable by a fork**: `database.rules.json` locks every slice to a role registered in *that*
+project, so an account you create can read nothing. **If you are running your own salon, you
+must create your own Firebase project and replace the config block.**
 
 **Salon Manager needs its OWN Firebase project.** It stores data under the same
 `shop/<slice>` paths as the grocery app, so pointing both at one project would have them
@@ -65,9 +68,17 @@ overwrite each other's live data.
 3. **Realtime Database** → Create database (pick your region).
 4. **Storage** → Get started (needed for vendor-bill proof uploads).
 5. **Project settings → General → Your apps → Web app** → copy the config values into
-   [`src/lib/firebase.js`](src/lib/firebase.js), replacing every `PLACEHOLDER_*`.
-6. Deploy the security rules (see [Roles & access control](#roles--access-control)).
+   [`src/lib/firebase.js`](src/lib/firebase.js), replacing the whole `firebaseConfig` object.
+   Every field matters, `databaseURL` included — it carries the region.
+6. Deploy the security rules — **both files**, and `storage.rules` needs one edit first:
+   see [Deploying the rules](#deploying-the-rules) and
+   [Storage rules setup](#storage-rules-setup).
 7. Sign in. **The first account to sign in claims ownership** of the salon.
+
+If the config is blanked out or its `apiKey` isn't a Firebase browser key, the sign-in screen
+says "Not connected yet" rather than failing with a cryptic `auth/invalid-api-key`. A config
+that is *well-formed but somebody else's* cannot be detected client-side — that one surfaces
+as permission-denied after sign-in, which is the rules doing their job.
 
 ## Run it
 
@@ -165,20 +176,54 @@ doesn't spray permission-denied errors at the counter.
 # one-time: install the CLI and sign in
 npm i -g firebase-tools && firebase login
 
-# edit OWNER_EMAIL in storage.rules (see below), then:
+# edit the owner allowlist in storage.rules first (see below), then:
 firebase deploy --only database,storage
 ```
 
 - [`database.rules.json`](database.rules.json) — role-based, per-slice. No email to edit:
   ownership is claimed by the first sign-in.
-- [`storage.rules`](storage.rules) — vendor-bill proofs. **Still needs `OWNER_EMAIL` filled
-  in**, because Storage rules *cannot read the Realtime Database* — there is no RTDB
-  equivalent of `firestore.get()`, so the role lookup isn't expressible there. Proofs are
-  owner-only anyway, so an email allowlist costs nothing in practice.
+- [`storage.rules`](storage.rules) — vendor-bill proofs. **Needs one edit before it works** —
+  see [Storage rules setup](#storage-rules-setup) directly below.
 - [`firebase.json`](firebase.json) — points the CLI at both rule files.
 
 > Until the rules are deployed, the database is only as safe as whatever rules are currently
 > live in the console. Treat deploying them as part of setup, not an optional extra.
+
+### Storage rules setup
+
+[`storage.rules`](storage.rules) ships with a **placeholder owner email** and will not work
+until you replace it. There is exactly one line to change — the allowlist inside `isOwner()`,
+at the top of the file:
+
+```
+function isOwner() {
+  return request.auth != null
+    && request.auth.token.email in ['OWNER_EMAIL_1'];   // ← your sign-in email
+}
+```
+
+Two owners? Make it a two-element list: `['a@x.com', 'b@x.com']`. Every rule that needs "is
+this the owner?" calls `isOwner()`, so no email appears anywhere else in the file.
+
+Then deploy:
+
+```bash
+firebase deploy --only storage
+```
+
+**Why an email here when the database uses roles.** Storage rules *cannot read the Realtime
+Database*. There is a `firestore.get()` cross-service call but no RTDB equivalent, so the
+`shop/users/<uid>/role` lookup that `database.rules.json` performs is simply not expressible
+in a Storage rule. The honest alternatives are an email allowlist or custom auth claims, and
+claims need a backend / the Admin SDK — out of scope for an app with no server. Vendor bills
+are owner-only anyway, so the allowlist costs nothing in practice: the set of people allowed
+to touch proofs is exactly {the owner}.
+
+**Deployed unedited, the failure is quiet.** Nobody matches `'OWNER_EMAIL_1'`, so every proof
+upload and every attempt to open one fails with `storage/unauthorized` — which reads in the
+app as "Upload failed", not as "a rules file still has a placeholder in it". Customer receipts
+(`shop/receipts/**`) are unaffected: they are public-read and staff-write, with no email in
+the rule.
 
 ### Bootstrap: how the first owner is created
 
@@ -404,9 +449,11 @@ Until that's set, every run fails at the `configure-pages` step with a **403**, 
 the build and the tests have all passed — the workflow is fine, the repository just has nowhere
 to publish to. Re-run the latest workflow (or push any commit) once it's enabled.
 
-The site then lands at `https://<user>.github.io/salon-manager/`. It will show the
-"not connected yet" sign-in screen until [`src/lib/firebase.js`](src/lib/firebase.js) has a real
-project in it.
+The site then lands at `https://<user>.github.io/salon-manager/`. A fork publishes with the
+committed config still in it, so it will sign in against **the author's project** and then be
+denied every read — put your own project in [`src/lib/firebase.js`](src/lib/firebase.js) before
+you point a salon at it (see
+[Before it will run](#-before-it-will-run-connect-a-firebase-project)).
 
 ## Rules testing
 

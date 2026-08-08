@@ -871,8 +871,9 @@ function Login() {
         <h2 style={{ fontSize: 16, margin: "18px 0 12px" }}>Sign in</h2>
         {!isFirebaseConfigured && (
           <div style={{ background: "var(--tint-warm, #FFF6E5)", border: "1px solid var(--tint-warm-border, #F0D9A8)", borderRadius: 9, padding: "10px 12px", marginBottom: 12, fontSize: 12.5, color: "#7A5B14", lineHeight: 1.6 }}>
-            <b>Not connected yet.</b> This build still has the placeholder Firebase config, so
-            sign-in and sync are inactive. Create a Firebase project and fill in
+            <b>Not connected yet.</b> The Firebase config in this build isn't usable (a blank
+            value, or an apiKey that isn't a Firebase browser key), so sign-in and sync are
+            inactive. Create your own Firebase project and fill in
             {" "}<code>src/lib/firebase.js</code> — the setup steps are in that file and in the README.
           </div>
         )}
