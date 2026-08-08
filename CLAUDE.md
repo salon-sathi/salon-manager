@@ -54,6 +54,41 @@ number of ticks reliably wins: loading a module is file I/O, not a queued task. 
 every view module is *evaluated* in those suites, so a module-init error in any screen fails
 the suite the same way `app.smoke.test.jsx` catches one in the shell.
 
+## The service worker
+
+Hand-rolled, ~90 lines, no Workbox and no `vite-plugin-pwa`. Its whole job is to make the app
+**shell** open with no network; data offline is unchanged (the `localStorage` snapshot, and a
+write attempted offline still hits the hard-stop modal).
+
+| Where | What |
+|---|---|
+| [`scripts/sw.js`](scripts/sw.js) | the worker — a **template**, with three placeholders |
+| [`scripts/vite-pwa-plugin.js`](scripts/vite-pwa-plugin.js) | fills them in at build time and emits `dist/sw.js` |
+| [`src/lib/ui/swUpdate.js`](src/lib/ui/swUpdate.js) | registration (production only) + the update signal |
+| [`public/manifest.webmanifest`](public/manifest.webmanifest) | install metadata; **relative** paths, so it works at `/` and at `/salon-manager/` |
+| [`scripts/make-icons.mjs`](scripts/make-icons.mjs) | run by hand when the logo changes; drives headless Chrome, commits `public/icon-{192,512}.png` |
+
+**The precache list is generated, and has to be.** Every asset is content-hashed, so a
+hand-written list is wrong the moment anything changes — and wrong in the worst way, because
+`cache.addAll` rejects on a single 404 and the install fails silently for everyone on that
+build. Substitution is **textual**, so don't write `__PRECACHE__` / `__INDEX__` / `__VERSION__`
+anywhere else in `sw.js`, comments included (a single-occurrence `.replace` already patched a
+comment once and left the real constant undefined).
+
+**Never cache a Firebase response.** `FIREBASE_HOSTS` bypasses the cache entirely for RTDB,
+auth, Storage and gstatic. A cached read here is a *wrong* read — the app is built on live
+snapshots, and a diary serving yesterday's bookings is worse than one that says "offline".
+Pinned by `scripts/vite-pwa-plugin.test.js`, along with "no `skipWaiting()` on install".
+
+**Only the shell is precached** (index, the entry chunk, react, firebase, the logo, the
+manifest). The lazy view chunks, pdfjs and xlsx are cached when first fetched — precaching them
+would make a first visit download the whole app before the till could open.
+
+`vite preview` needs `isPreview` in `vite.config.js` to serve at `/salon-manager/`. Without it
+the built app is served at `/` while its own HTML asks for `/salon-manager/…`, every asset falls
+through to the SPA fallback, and the manifest and worker both arrive as `text/html` — which
+reads as a broken PWA rather than a base-path mistake.
+
 ## The vendored xlsx tarball
 
 `xlsx` (SheetJS) is **not on the npm registry**. It used to be installed straight from the

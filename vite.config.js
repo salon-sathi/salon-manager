@@ -1,11 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import changelog from "./scripts/vite-changelog-plugin.js";
+import pwa from "./scripts/vite-pwa-plugin.js";
 
 // Served at the repo sub-path on GitHub Pages in production; at root during local dev.
-export default defineConfig(({ command }) => ({
-  base: command === "build" ? "/salon-manager/" : "/",
-  plugins: [react(), changelog()],
+//
+// `isPreview` matters and is easy to miss: `vite preview` runs with command === "serve", so
+// keying only on "build" served the built app at "/" while its own index.html asked for
+// /salon-manager/… — every asset fell through to the SPA fallback and came back as index.html
+// with a text/html content-type. That makes the service worker untestable locally (a manifest
+// and a worker script both served as HTML) and looks like a PWA bug rather than a base-path one.
+export default defineConfig(({ command, isPreview }) => ({
+  base: command === "build" || isPreview ? "/salon-manager/" : "/",
+  plugins: [react(), changelog(), pwa()],
   server: { port: 5173, open: true },
   build: {
     // Split heavy vendors into their own chunks so the browser caches them across

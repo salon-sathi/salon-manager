@@ -1,6 +1,7 @@
 // Shared React hooks.
 
 import { useEffect, useState } from "react";
+import { onUpdateReady } from "./swUpdate.js";
 
 // ---------- viewport ----------
 // Most responsive behaviour is plain CSS (see the media queries at the bottom of this file):
@@ -33,4 +34,12 @@ function useMediaQuery(query) {
 }
 
 
-export { useMediaQuery };
+// True once a newer build has been downloaded and is waiting to take over. Always false in
+// dev and in the jsdom suites — nothing registers a worker there, so nothing ever announces.
+function useUpdateReady() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => onUpdateReady(setReady), []);
+  return ready;
+}
+
+export { useMediaQuery, useUpdateReady };

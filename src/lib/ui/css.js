@@ -43,6 +43,10 @@ const S = {
   connBadge: { position: "fixed", bottom: 18, right: 16, zIndex: 90, display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800, letterSpacing: ".02em", boxShadow: "0 4px 14px rgba(0,0,0,.22)", border: "2px solid", userSelect: "none" },
   connOn: { background: "#DCFCE7", color: "#0F7A43", borderColor: "#7FDDA8" },
   connOff: { background: "#B3261E", color: "#fff", borderColor: "#fff" },
+  // "Update ready", pinned directly ABOVE the connection pill so the two stack instead of
+  // overlapping, and so the pair reads as one status corner. Opaque, like everything else
+  // pinned over scrolling content. `bottom` clears the 44px-ish connection pill.
+  updateBadge: { position: "fixed", bottom: 66, right: 16, zIndex: 90, display: "inline-flex", alignItems: "center", gap: 10, padding: "7px 8px 7px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800, background: "#10331f", color: "#fff", border: "2px solid #E8A33D", boxShadow: "0 4px 14px rgba(0,0,0,.22)" },
   overlay: { position: "fixed", inset: 0, background: "var(--overlay-bg, rgba(15,30,20,.45))", backdropFilter: "var(--scrim-blur, none)", WebkitBackdropFilter: "var(--scrim-blur, none)", display: "grid", placeItems: "center", zIndex: 50 },
   modal: { background: "var(--modal-bg, #fff)", borderRadius: 16, padding: 20, width: "min(480px, 92vw)", overflow: "auto", backdropFilter: "var(--modal-blur, none)", WebkitBackdropFilter: "var(--modal-blur, none)", boxShadow: "var(--glass-shadow, none)" },
 };

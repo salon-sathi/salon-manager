@@ -93,6 +93,26 @@ const ConnBadge = ({ online }) => (
   </div>
 );
 
+// "A new version is ready" — shown once the service worker has a newer build waiting.
+//
+// A pinned pill beside ConnBadge, NOT a toast: the toast clears itself after 2.2 seconds, and
+// an offer the salon has to catch within 2.2 seconds is an offer they will miss. It also carries
+// an action, which a toast has nowhere to put. It never appears on the first install (that is
+// not an update) and never interrupts anything — the salon takes it when the till is free.
+const UpdateBadge = ({ onReload }) => (
+  <div style={S.updateBadge} role="status" aria-live="polite">
+    <span>✨ Update ready</span>
+    <button
+      className="btn small"
+      onClick={onReload}
+      style={{ background: "#fff", color: "#10331f", border: "none", fontWeight: 800 }}
+      title="Reload to use the new version. Anything unsaved on this screen is lost, so finish the bill first."
+    >
+      Reload
+    </button>
+  </div>
+);
+
 // One entry in the sidebar, the collapsed tablet rail, or the phone's "More" sheet.
 //
 // The label is wrapped in a span rather than left as a bare text node for one reason: the
@@ -178,4 +198,4 @@ function Modal({ title, children, onClose }) {
 }
 
 
-export { Splash, NoAccess, OfflineBlockModal, SendFailedModal, ConnBadge, NavButton, Header, Card, Field, Empty, Modal };
+export { Splash, NoAccess, OfflineBlockModal, SendFailedModal, ConnBadge, UpdateBadge, NavButton, Header, Card, Field, Empty, Modal };

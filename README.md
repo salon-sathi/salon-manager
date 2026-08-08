@@ -90,6 +90,36 @@ npm run dev      # http://localhost:5173
 Other scripts: `npm run build`, `npm run preview`, `npm run lint`, `npm run format`,
 `npm test` (Vitest), `npm run test:watch`.
 
+## Install it as an app / opening offline
+
+Salon Manager is installable. On the counter tablet or a phone, open the site and use the
+browser's **Install app** / **Add to Home Screen**: it then opens full-screen from its own icon,
+with no address bar — which on a shared salon device also means nobody navigates it somewhere
+else by accident.
+
+**What works with the Wi-Fi off:** the app **opens**. A service worker caches the app shell (the
+HTML, the JavaScript, the logo), so the icon still launches something rather than a browser
+error page. The **data** you then see is the same local snapshot the app has always kept —
+`localStorage`, last-known, read-only in practice — and **saving anything still requires a
+connection**: a write attempted offline is refused with the red hard-stop, exactly as before.
+This is a deliberate line. A salon that could ring up bills offline would be a salon whose
+tablet and phone quietly disagree about the day's takings.
+
+**Nothing from Firebase is ever cached.** Not the database, not auth, not Storage. A cached read
+would be a *wrong* read here — a diary showing yesterday's bookings is worse than one that says
+"offline", because the salon acts on what it sees.
+
+**Updates.** A new deploy is downloaded in the background and then *waits*. An "✨ Update ready"
+pill appears next to the connection badge with a **Reload** button, and nothing changes until
+it's pressed — the app is not going to swap itself out in the middle of a bill. Take it between
+customers.
+
+The worker is ~90 lines, hand-written, and only registers in a production build
+([`scripts/sw.js`](scripts/sw.js), wired up by
+[`scripts/vite-pwa-plugin.js`](scripts/vite-pwa-plugin.js), registered in
+[`src/lib/ui/swUpdate.js`](src/lib/ui/swUpdate.js)). There is no Workbox and no PWA plugin.
+`npm run dev` has no service worker at all — a cached shell in front of Vite's HMR helps nobody.
+
 ## Roles & access control
 
 Salon Manager is **multi-user**. The owner manages staff accounts from inside the app

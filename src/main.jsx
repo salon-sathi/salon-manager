@@ -1,6 +1,7 @@
 import { StrictMode, Component } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./salon-manager.jsx";
+import { registerServiceWorker } from "./lib/ui/swUpdate.js";
 
 // ----------------------------------------------------------------------------
 // Error boundary — without this, any render-time exception unmounts the whole
@@ -64,3 +65,8 @@ createRoot(document.getElementById("root")).render(
     </ErrorBoundary>
   </StrictMode>
 );
+
+// Caches the app SHELL so it opens with no network. Production builds only, and it caches
+// nothing from Firebase — the salon's DATA offline is still the localStorage snapshot the app
+// already keeps. See src/lib/ui/swUpdate.js and scripts/sw.js.
+registerServiceWorker();

@@ -25,6 +25,27 @@ export default [
     },
   },
   {
+    // Build-time Node scripts: the vite plugins and the icon generator.
+    files: ["scripts/**/*.{js,mjs}"],
+    ignores: ["scripts/sw.js"],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    // scripts/sw.js is the service-worker TEMPLATE — it runs in a worker, not in Node and not
+    // in a page, so it needs `self`/`caches`/`clients`/`skipWaiting`. Its two build-time
+    // placeholders (__PRECACHE__, __INDEX__, __VERSION__) are substituted by the plugin, so
+    // they read as undefined identifiers here.
+    files: ["scripts/sw.js"],
+    languageOptions: {
+      globals: {
+        ...globals.serviceworker,
+        __PRECACHE__: "readonly",
+        __INDEX__: "readonly",
+        __VERSION__: "readonly",
+      },
+    },
+  },
+  {
     // The rules suite is Node, not a browser, and it is not React. `useRulesHarness()` is a
     // Vitest lifecycle helper whose name happens to match the hook convention, so the
     // rules-of-hooks check fires on a file that has never seen a component.

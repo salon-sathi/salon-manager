@@ -17,7 +17,12 @@
     <meta name="apple-mobile-web-app-title" content="Salon Manager" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%logo.svg" />
-    <link rel="apple-touch-icon" href="%BASE_URL%logo.svg" />
+    <!-- iOS ignores the manifest's icons for the home screen and reads this instead — and it
+         will not take an SVG, which is half the reason the PNG pair exists. -->
+    <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
+    <!-- Installable app: name, icons, standalone display. The manifest's own paths are
+         RELATIVE, so it resolves correctly both at / in dev and at /salon-manager/ on Pages. -->
+    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <title>Salon Manager — Appointments, Billing & CRM</title>
     <style>
       * { margin: 0; }

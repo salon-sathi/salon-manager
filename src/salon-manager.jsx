@@ -6,7 +6,7 @@
 // live") before moving anything between them.
 
 import { SERVICE_ICON_CSS, ServiceIconDefs } from "./components/ServiceIcon.jsx";
-import { ConnBadge, Field, NavButton, NoAccess, OfflineBlockModal, Splash } from "./components/primitives.jsx";
+import { ConnBadge, Field, NavButton, NoAccess, OfflineBlockModal, Splash, UpdateBadge } from "./components/primitives.jsx";
 import { MQ } from "./lib/breakpoints.js";
 import { reconcileCustomers } from "./lib/customers.js";
 import { auth, isFirebaseConfigured } from "./lib/firebase.js";
@@ -17,7 +17,8 @@ import { SLICES, buildSliceUpdate, isLegacyShape, mapToArray, mergeRemote, overw
 import { LOGO_SRC } from "./lib/ui/assets.js";
 import { CSS, S } from "./lib/ui/css.js";
 import { todayStr, uid } from "./lib/ui/format.js";
-import { useMediaQuery } from "./lib/ui/hooks.js";
+import { useMediaQuery, useUpdateReady } from "./lib/ui/hooks.js";
+import { applyUpdate } from "./lib/ui/swUpdate.js";
 import { CUSTOM_CATS_KEY, catList, daysToExpiry, normalizeItems } from "./lib/ui/inventory.js";
 import { OTHER_TABS, PHONE_BAR_TABS, PHONE_TAB_LABELS, TOP_TABS, tabAllowed, tabEnabled } from "./lib/ui/nav.js";
 import { SEED_ITEMS, SEED_SERVICES, SEED_STAFF, SEED_TEMPLATES } from "./lib/ui/seeds.js";
@@ -696,6 +697,7 @@ function StoreManager({ user, role, onLogout }) {
   // rendering the original desktop shell.)
   const isPhone = useMediaQuery(MQ.phone);
   const isTabletRail = useMediaQuery(MQ.tablet);
+  const updateReady = useUpdateReady();
   const [railOpen, setRailOpen] = useState(false); // tablet: icon rail expanded over the content
   const [moreOpen, setMoreOpen] = useState(false); // phone: the "More" sheet
 
@@ -979,6 +981,10 @@ function StoreManager({ user, role, onLogout }) {
 
       {/* Connection status on every screen, and the hard-stop popup when a write is tried offline. */}
       <ConnBadge online={online} />
+      {/* A newer build has finished downloading in the background. Deliberately an offer, not
+          an interruption: the salon takes it between customers. Never shown on a first install
+          or in dev — nothing registers a worker there. */}
+      {updateReady && <UpdateBadge onReload={applyUpdate} />}
       {offlineBlock && <OfflineBlockModal onClose={() => setOfflineBlock(false)} />}
     </div>
   );
