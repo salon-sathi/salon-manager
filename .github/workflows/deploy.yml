@@ -28,6 +28,11 @@ jobs:
         with:
           # Node 24 ships npm 11, which correctly skips esbuild's foreign-platform
           # optional deps during `npm ci`. npm 10 (Node 20) errors EBADPLATFORM on them.
+          # Still current: esbuild is still in the tree (Vite uses it), and its per-platform
+          # packages are still in the lockfile. Unrelated to the xlsx dependency, which used
+          # to be a CDN tarball and is now vendored at vendor/xlsx-0.20.3.tgz — so `npm ci`
+          # no longer needs cdn.sheetjs.com to be reachable from the runner, whatever npm
+          # version it runs.
           node-version: 24
           cache: npm
       - run: npm ci

@@ -16,6 +16,32 @@ wrong when working in the repo.
 
 `npm test` and `npm run test:rules` are **separate on purpose** — see below.
 
+## The vendored xlsx tarball
+
+`xlsx` (SheetJS) is **not on the npm registry**. It used to be installed straight from the
+publisher's CDN — `"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"` — which meant
+`npm ci` reached a host that isn't the registry, with whatever that host served at the time.
+The tarball is now committed at [`vendor/xlsx-0.20.3.tgz`](vendor/xlsx-0.20.3.tgz) and the
+dependency reads `file:vendor/xlsx-0.20.3.tgz`.
+
+The committed file is **byte-identical** to what the CDN served: its sha512 matches the
+`integrity` the old lockfile had already pinned, and that same hash is what the new lockfile
+carries — so `npm ci` still verifies it, it just verifies a file that's in the repo.
+
+**Upgrading it** (SheetJS publishes versions, never a range):
+
+```bash
+curl -fsSLO https://cdn.sheetjs.com/xlsx-<new>/xlsx-<new>.tgz   # into vendor/
+git rm vendor/xlsx-<old>.tgz
+# package.json → "xlsx": "file:vendor/xlsx-<new>.tgz"
+npm install --package-lock-only && npm ci && npm test && npm run build
+```
+
+Keep the version in the **filename** — `file:vendor/xlsx.tgz` would make a version bump an
+invisible content change to a binary blob. `*.tgz` is marked `binary` in `.gitattributes`;
+this repo is checked out with `core.autocrlf=true`, and a mangled archive would only surface
+as an integrity failure in CI.
+
 ## Security-rules tests
 
 [`database.rules.json`](database.rules.json) is the real access boundary; `src/lib/roles.js`
