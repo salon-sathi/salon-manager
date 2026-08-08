@@ -135,8 +135,10 @@ const DELEGABLE_ANY = [
   "customers.pick",
   "customers.browse",
   "sales.view",
-  "sales.edit", // the rules gate DELETES only, so editing really is the owner's to give
-  "udhari.manage", // settling credit writes shop/sales, which every active role may do
+  // sales.edit and udhari.manage USED to live here, on the grounds that the rules gated
+  // deletes only and any active user could rewrite a bill. That hole is closed:
+  // shop/sales/$id is now create-only for non-owners, so both would open a screen whose
+  // every save comes back permission-denied. See LOCKED_FEATURES.
   "reminders.use", // sending only — editing a template is reminders.templates, owner-only
   "inventory.view",
   "alerts.view",
@@ -168,7 +170,14 @@ export const CONFIGURABLE_ROLES = Object.keys(GRANTABLE);
  * behind these lines is absent from GRANTABLE above.
  */
 export const LOCKED_FEATURES = [
-  { what: "Deleting a bill", why: "the rules let only an owner remove a sale" },
+  {
+    what: "Editing, splitting or deleting a bill",
+    why: "the rules let a worker CREATE a sale and nothing else — a bill can't be rewritten after the fact",
+  },
+  {
+    what: "Udhari (credit) — settling what a customer owes",
+    why: "recording a payment rewrites the bill it sits on, which is an owner-only write",
+  },
   {
     what: "Services, Staff, Packages, Loyalty rules, message templates",
     why: "the salon's catalogue and prices are owner-write-only at the database",
@@ -193,14 +202,12 @@ export const ACTION_LABELS = {
   "billing.use": { label: "Billing (POS)", hint: "Open the till and ring up a bill" },
   "billing.discount": { label: "Give a discount", hint: "Take money off a bill at the counter" },
   "billing.backdate": { label: "Backdate a bill", hint: "Save a bill against an earlier date" },
-  "udhari.manage": { label: "Udhari (credit)", hint: "See who owes money and settle it" },
   "appointments.view": { label: "See the diary", hint: "Open the appointments calendar" },
   "appointments.edit": { label: "Book & reschedule", hint: "Create, move, cancel and block time" },
   "customers.pick": { label: "Find a customer", hint: "Search and quick-add from the billing screen" },
   "customers.browse": { label: "Customer list", hint: "Full profiles, spend, segments and export" },
   "reminders.use": { label: "Reminders", hint: "See who's due and send them a message" },
   "sales.view": { label: "Sales history", hint: "Past bills, and reprint a receipt" },
-  "sales.edit": { label: "Edit a bill", hint: "Change or split a bill that's already saved" },
   "inventory.view": { label: "See stock", hint: "Product list and stock levels" },
   "inventory.edit": { label: "Change stock", hint: "Add, edit and restock products" },
   "alerts.view": { label: "Stock alerts", hint: "Low stock and near-expiry warnings" },
@@ -212,10 +219,10 @@ export const ACTION_LABELS = {
 /** The toggles grouped the way the panel lists them. Every grantable action appears
  *  exactly once; the panel shows a row only where GRANTABLE allows it for some role. */
 export const FEATURE_GROUPS = [
-  { title: "Billing", actions: ["billing.use", "billing.discount", "billing.backdate", "udhari.manage"] },
+  { title: "Billing", actions: ["billing.use", "billing.discount", "billing.backdate"] },
   { title: "Appointments", actions: ["appointments.view", "appointments.edit"] },
   { title: "Customers", actions: ["customers.pick", "customers.browse", "reminders.use"] },
-  { title: "Sales history", actions: ["sales.view", "sales.edit"] },
+  { title: "Sales history", actions: ["sales.view"] },
   { title: "Stock", actions: ["inventory.view", "inventory.edit", "alerts.view", "barcode.use", "import.use"] },
   { title: "Other", actions: ["logs.view"] },
 ];

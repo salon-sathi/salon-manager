@@ -108,7 +108,7 @@ A ⚙ marks a row the owner can switch either way.
 | Dashboard — today's diary + their own bills | ✅ | ✅ | ✅ |
 | Browse the customer database, profiles, segments | ✅ | — ⚙ | — ⚙ |
 | View a past bill (to reprint) | ✅ | ✅ ⚙ | ✅ ⚙ |
-| Edit a bill | ✅ | — ⚙ | — ⚙ |
+| Edit or split a saved bill | ✅ | — | — |
 | Delete a bill | ✅ | — | — |
 | Back-date a bill | ✅ | — ⚙ | — ⚙ |
 | Inventory — see stock | ✅ | — ⚙ | ✅ ⚙ |
@@ -117,7 +117,7 @@ A ⚙ marks a row the owner can switch either way.
 | Barcode Creator, Data Import | ✅ | — | ✅ ⚙ |
 | Finance, Stats | ✅ | — | — |
 | Expenses, Vendor Bills | ✅ | — | — |
-| Udhari ledger | ✅ | — ⚙ | — ⚙ |
+| Udhari ledger | ✅ | — | — |
 | Redeem a customer's points / package at the till | ✅ | ✅ | ✅ |
 | Services, Staff, Packages, Loyalty config | ✅ | — | — |
 | Staff commissions & payout reports | ✅ | — | — |
@@ -242,9 +242,10 @@ cannot function without reading `sales`, `customers`, `items` and `services`. So
 
 - ✅ **Genuinely protected, server-side.** Expenses, vendor bills, and the daily-bills slice
   are unreadable to workers. Settings, the service menu, prices, commission rates, package
-  definitions and the user registry are **read-only** to workers. Deleting a bill is
-  **owner-only**, enforced by a rule (`newData.exists()` separates an edit from a delete),
-  not merely hidden. Restore requires a whole-tree write the rules deny to non-owners.
+  definitions and the user registry are **read-only** to workers. A saved bill is
+  **write-once for a worker** — `shop/sales/$id` allows a create and nothing else, so editing,
+  splitting and deleting are all owner-only by rule rather than merely hidden. Restore
+  requires a whole-tree write the rules deny to non-owners.
 - ⚠ **A UI control, not a boundary.** Workers can read `sales` because the POS needs it, so a
   technically skilled worker could open the browser console and derive revenue totals from
   raw data. Likewise "create a customer but don't browse the customer list" is a UI
@@ -513,14 +514,23 @@ like flaky rules rather than a config problem.
 
 ### What the suite found
 
-Two behaviours where the database is **more permissive than this README reads**. Both are
-asserted as-is, so the suite documents reality rather than the intention:
+- **A biller could edit an existing bill — now closed.** The rule on `shop/sales/$id` was
+  `newData.exists() || role === 'owner'`, and `newData.exists()` only separates a delete from
+  a write, so it gated **deletes only**: any active user could overwrite a saved bill,
+  including one somebody else rang up. It now reads
+  `(!data.exists() && newData.exists()) || role === 'owner'` — **create-only for a worker**.
+  A biller rings a bill up and cannot touch it again; editing, splitting and deleting are all
+  the owner's, enforced at the database rather than in the UI. Bills are also **shape-checked**
+  now (`id`, `date`, `total`, `lines`; `total` a number, `date` a `YYYY-MM-DD` string), as are
+  customers (`id` and a non-empty `name`) — a malformed record breaks every derived figure in
+  the app, and there are no running totals to repair it from.
 
-- **A biller can edit an existing bill.** The rule on `shop/sales/$id` is
-  `newData.exists() || role === 'owner'`, so `newData.exists()` gates **deletes only**.
-  The role table above lists "Edit or delete a bill" as owner-only; the *delete* half is
-  rule-enforced, the *edit* half is [`roles.js`](src/lib/roles.js) and the UI. A biller can
-  also overwrite a bill somebody else rang up.
+  Two consequences worth knowing. **Feature access lost two switches**: "Edit a bill" and
+  "Udhari (credit)" are no longer the owner's to delegate, because both write to a saved bill
+  — they moved from `GRANTABLE` to the locked list, with the reason shown in the panel. And
+  the sync layer's **field-level deltas still work**, because RTDB validates the *resulting*
+  record: `newData` at `shop/sales/$id` is the merge of the delta with what is stored, so a
+  one-field update of a well-formed bill satisfies `hasChildren`.
 - **The rules do not stop the last active owner from demoting, deactivating or deleting
   themselves.** "The owner can't lock themselves out" is true of the *app*, which refuses it —
   but the rule on `shop/users/$uid` only asks "is the actor an active owner?" and nothing
@@ -528,5 +538,6 @@ asserted as-is, so the suite documents reality rather than the intention:
   this is not expressible there; closing it server-side would need a maintained counter node
   or a Cloud Function. Recovery from a self-lockout is a Firebase console visit.
 
-Neither is a privilege-escalation hole — both require an already-privileged actor, and no
-worker gains anything the role matrix denies them.
+Neither was a privilege-escalation hole — both require an already-privileged actor, and no
+worker gains anything the role matrix denies them. The first is now closed anyway; the second
+stays documented rather than fixed, because RTDB cannot express it.

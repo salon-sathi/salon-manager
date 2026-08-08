@@ -88,17 +88,47 @@
       },
 
       // ---- sales: bills ----------------------------------------------------
-      // Every active role reads and creates bills — that is the POS. But an
-      // existing bill may only be DELETED by an owner: `newData.exists()`
-      // distinguishes a create/update from a delete. This is what stops a
-      // worker from erasing a sale they rang up.
+      // Every active role reads and CREATES bills — that is the POS. Changing
+      // or deleting one afterwards is an owner action:
+      //   !data.exists() && newData.exists()  → a create (any active user)
+      //   data.exists()                       → an edit or a delete (owner)
       //
-      // NOTE: workers can read sales because the POS cannot work otherwise.
-      // See the README — this is a known and accepted limit of the design.
+      // WHY: a bill is the shop's record of what was taken. A biller who can
+      // rewrite one after the fact can move money off the books — re-ring a
+      // ₹2000 bill as ₹200 an hour later, or overwrite a sale somebody else
+      // rang up — and nothing downstream would show it, because every figure
+      // in the app (revenue, commission, points, package sessions) is DERIVED
+      // from the bills. The README's role table has always listed editing and
+      // deleting a bill as the owner's; this used to enforce only the delete
+      // half, because `newData.exists()` alone cannot tell a create from an
+      // edit. Adding `!data.exists()` is what closes it.
+      //
+      // NOTE: workers can still READ sales because the POS cannot work
+      // otherwise. See the README — a known and accepted limit of the design.
+      //
+      // The .validate below is the record's shape. It is written to hold for
+      // FIELD-LEVEL updates too: src/lib/sync.js pushes deltas (buildSliceUpdate
+      // writes `<id>/<field>` paths, and only writes a whole record when the
+      // record is new), and RTDB validates the RESULTING node — `newData` at
+      // $id is the merge of the write with what is already stored — so a
+      // one-field update of an existing, well-formed bill still satisfies
+      // hasChildren. Ancestor .validate rules ARE evaluated on a child write,
+      // which is exactly what makes that work. A delete writes null, and
+      // .validate never runs on a node that is being removed, hence the
+      // `!newData.exists() ||` guard.
       "sales": {
         ".read": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true",
         "$id": {
-          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true && (newData.exists() || root.child('shop/users').child(auth.uid).child('role').val() === 'owner')"
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true && ((!data.exists() && newData.exists()) || root.child('shop/users').child(auth.uid).child('role').val() === 'owner')",
+          ".validate": "!newData.exists() || newData.hasChildren(['id', 'date', 'total', 'lines'])",
+
+          "id": { ".validate": "newData.isString()" },
+          // Local date, never a timestamp — the whole app bills in the salon's
+          // own day. YYYY-MM-DD is what todayStr() and every date input produce.
+          "date": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          // Paise-rounded rupees. A string here would still add up in JS and
+          // silently corrupt every total downstream.
+          "total": { ".validate": "newData.isNumber()" }
         }
       },
 
@@ -117,9 +147,26 @@
       // cannot grant "create but don't browse" here — the browse restriction is
       // a UI control only (roles.js: customers.pick vs customers.browse).
       // Documented in the README.
+      //
+      // The shape is validated per record, on the same terms as sales above: a
+      // customer is keyed by phone and `id` IS that phone (blankCustomer sets
+      // both), so a record without one cannot be found again by anything. The
+      // name is what every reminder, receipt and search result renders, and a
+      // blank one turns the customer list into a column of empty rows — the UI
+      // already refuses it (validateCustomer), this makes it true of the
+      // database as well. Partial updates keep passing for the same reason
+      // they do on sales: the reconcilers push single fields (totalVisits,
+      // loyaltyPoints, …) onto records that already carry id and name, and
+      // `newData` at $id is the merged result, not just the delta.
       "customers": {
         ".read": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true",
-        ".write": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true"
+        ".write": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true",
+        "$id": {
+          ".validate": "!newData.exists() || newData.hasChildren(['id', 'name'])",
+
+          "id": { ".validate": "newData.isString()" },
+          "name": { ".validate": "newData.isString() && newData.val().length > 0" }
+        }
       },
 
       // ---- the salon catalogue: read-only for workers -----------------------

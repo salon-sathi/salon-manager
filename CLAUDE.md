@@ -94,14 +94,33 @@ Three things that will bite:
    (sending) and `reminders.templates` (editing the templates, which writes an owner-only node)
    are separate actions, and why `SEEDERS.messageTemplates` gates on the latter.
 
-### Known rule-vs-README divergences
+### sales & customers: create-only, and shape-checked
 
-Both are asserted as-is by the suite, so it documents real behaviour. Don't "fix" the tests
-to match the README:
+`shop/sales/$id` is **create-only for a non-owner**:
+`(!data.exists() && newData.exists()) || role === 'owner'`. It used to be
+`newData.exists() || owner`, which gates deletes only — any active user could rewrite a saved
+bill. Both slices also carry a `.validate` (sales: `id`/`date`/`total`/`lines`, with `total` a
+number and `date` `YYYY-MM-DD`; customers: `id` + a non-empty `name`).
 
-- **A biller can edit an existing bill.** `shop/sales/$id` is gated on
-  `newData.exists() || role === 'owner'`, so that clause gates **deletes only**. The delete
-  half is rule-enforced; the edit half is UI-only.
+Three things this rests on:
+
+1. **Field-level deltas still pass the `hasChildren` validate.** `buildSliceUpdate` writes
+   `<id>/<field>` paths, and RTDB validates the *resulting* node — `newData` at `$id` is the
+   merge of the delta with what is stored. Ancestor `.validate` rules ARE evaluated on a child
+   write, which is what makes a one-field update of a well-formed record legal. A partial write
+   that would *create* a record from a single field is not, which is fine: `buildSliceUpdate`
+   writes new records whole.
+2. **`.validate` never runs on a delete**, hence the `!newData.exists() ||` guard on both.
+3. **`GRANTABLE` shrank with the rule.** `sales.edit` and `udhari.manage` were delegable
+   *because* of the old hole (settling credit rewrites the bill the debt sits on). They are in
+   `LOCKED_FEATURES` now. This is the envelope rule in action — a switch outside what the rules
+   allow is a screen that fails at the counter.
+
+### Known rule-vs-README divergence
+
+Asserted as-is by the suite, so it documents real behaviour. Don't "fix" the test to match the
+README:
+
 - **The rules let the last active owner demote/deactivate/delete themselves.** The app
   refuses this; the rules cannot express it (RTDB has no way to count siblings matching a
   predicate). Closing it server-side needs a maintained counter node or a Cloud Function.

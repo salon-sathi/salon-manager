@@ -36,16 +36,20 @@ const NEVER_DELEGABLE = [
   "users.manage",
   "backup.use",
   "sales.delete",
+  // shop/sales/$id is create-only for a non-owner: a worker rings a bill up and cannot
+  // touch it again. Editing/splitting a saved bill (sales.edit) and settling credit
+  // (udhari.manage, which rewrites the bill the debt sits on) are therefore not the
+  // owner's to delegate — the database would refuse the write either way.
+  "sales.edit",
+  "udhari.manage",
 ];
 
 // Withheld from workers by DEFAULT, but the owner is allowed to hand these out from
 // Settings → Users & roles → Feature access, because the rules already permit them.
 const OFF_BY_DEFAULT = [
-  "udhari.manage",
   "reminders.use",
   "logs.view",
   "customers.browse",
-  "sales.edit",
   "billing.backdate",
 ];
 
@@ -301,12 +305,22 @@ describe("can — with the owner's switches", () => {
   });
 
   it("grants a withheld feature when the owner switches it on", () => {
-    const perms = { biller: { "customers.browse": true, "sales.edit": true } };
+    const perms = { biller: { "customers.browse": true, "billing.backdate": true } };
     expect(can("biller", "customers.browse", perms)).toBe(true);
-    expect(can("biller", "sales.edit", perms)).toBe(true);
+    expect(can("biller", "billing.backdate", perms)).toBe(true);
     // and leaves the rest of the role alone
     expect(can("biller", "sales.delete", perms)).toBe(false);
     expect(can("biller", "billing.use", perms)).toBe(true);
+  });
+
+  it("will not hand out a bill edit or the credit ledger, however it is asked", () => {
+    // Both were switchable until shop/sales/$id became create-only for non-owners. A saved
+    // permissions blob from that version must not keep working — it would open a screen
+    // whose every save comes back permission-denied at the counter.
+    const legacy = { biller: { "sales.edit": true }, inventory: { "udhari.manage": true } };
+    expect(can("biller", "sales.edit", legacy)).toBe(false);
+    expect(can("inventory", "udhari.manage", legacy)).toBe(false);
+    expect(sanitizePermissions(legacy)).toEqual({});
   });
 
   it("revokes a default feature when the owner switches it off", () => {
@@ -339,11 +353,11 @@ describe("can — with the owner's switches", () => {
   });
 
   it("still fails closed on unknown roles, unknown actions and non-boolean switches", () => {
-    const perms = { biller: { "customers.browse": "yes", "sales.edit": 1, "logs.view": null } };
+    const perms = { biller: { "customers.browse": "yes", "billing.backdate": 1, "logs.view": null } };
     expect(can("admin", "billing.use", { admin: { "billing.use": true } })).toBe(false);
     expect(can("biller", "totally.made.up", { biller: { "totally.made.up": true } })).toBe(false);
     // A non-boolean is not an instruction — fall back to the default.
-    ["customers.browse", "sales.edit", "logs.view"].forEach((a) =>
+    ["customers.browse", "billing.backdate", "logs.view"].forEach((a) =>
       expect(can("biller", a, perms)).toBe(false)
     );
   });
@@ -391,7 +405,7 @@ describe("sanitizePermissions", () => {
   });
 
   it("round-trips a clean map unchanged", () => {
-    const clean = { biller: { "sales.edit": true }, inventory: { "import.use": false } };
+    const clean = { biller: { "customers.browse": true }, inventory: { "import.use": false } };
     expect(sanitizePermissions(clean)).toEqual(clean);
   });
 });

@@ -247,7 +247,7 @@ describe("the panel itself", () => {
 
     // …and does offer once something actually changes.
     const box = [...live.container.querySelectorAll('input[type="checkbox"]')]
-      .find((b) => b.getAttribute("aria-label") === "Edit a bill for Biller");
+      .find((b) => b.getAttribute("aria-label") === "Backdate a bill for Biller");
     await act(async () => { box.click(); });
     await flush();
     expect([...live.container.querySelectorAll("button")].some((b) => b.textContent === "Save feature access")).toBe(true);
