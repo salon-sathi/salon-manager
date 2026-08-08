@@ -62,12 +62,25 @@ vi.mock("qrcode-generator", () => ({ default: () => ({ addData() {}, make() {}, 
 
 beforeAll(() => { globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }; });
 
-const flush = async () => { for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); }); };
+// Every screen is a React.lazy chunk. Warm them all first: React.lazy then resolves from the
+// module cache in a microtask, instead of racing a real dynamic import inside act() — which no
+// number of ticks reliably covers, because loading a module is file I/O, not a queued task.
+const preloadViews = () => Promise.all(Object.values(import.meta.glob("./views/*.jsx")).map((load) => load()));
+// Views are React.lazy chunks now, so a render can be waiting on a dynamic import — which
+// settles on the MACROTASK queue, not the microtask queue a bare `await` drains. The
+// setTimeout is what lets the imported view mount before the assertions read the DOM.
+const flush = async () => {
+  for (let i = 0; i < 5; i++) {
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  }
+};
 
 /** Mount the real app as `role`, with `permissions` already saved in the shop config. */
 async function mountAs(role, permissions) {
   fx.role = role;
   fx.config = permissions ? { permissions } : {};
+  await preloadViews();
   const App = (await import("./salon-manager.jsx")).default;
   const container = document.createElement("div");
   document.body.appendChild(container);

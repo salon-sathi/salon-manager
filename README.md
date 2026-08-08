@@ -314,7 +314,12 @@ tested data (no clock, no randomness).
 
 ## Architecture
 
-- **`src/salon-manager.jsx`** — the app: shell, sync wiring, and every view.
+- **`src/salon-manager.jsx`** — the app shell: sign-in, the role gate, sync wiring, the nav and
+  the view switch.
+- **`src/views/*.jsx`** — one screen per file, each loaded on demand (`React.lazy`), so the
+  counter tablet downloads the till and the diary rather than the whole app.
+- **`src/components/*.jsx`**, **`src/lib/ui/*.js`** — what more than one screen shares: the
+  receipt, the customer picker, the chart scaffolding, the stylesheet, the theme.
 - **`src/lib/*.js`** — pure, unit-tested logic. No React, no Firebase (except the thin
   `firebase.js` / `sync.js` / `bills.js` adapters).
 

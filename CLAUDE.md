@@ -16,6 +16,44 @@ wrong when working in the repo.
 
 `npm test` and `npm run test:rules` are **separate on purpose** — see below.
 
+## Where things live
+
+`salon-manager.jsx` used to be the whole app — 10,111 lines, every screen in one file. It is
+now the **shell only** (~920 lines): sign-in, the role gate, the sync wiring, the seeders, the
+nav and the view switch.
+
+| Where | What |
+|---|---|
+| `src/salon-manager.jsx` | the shell. Keep it under ~1,500 lines. |
+| `src/views/<Name>.jsx` | one screen per file, `export default` the component the switch renders. |
+| `src/components/*.jsx` | UI shared by more than one view. |
+| `src/lib/ui/*.js` | shared non-React UI logic: formatting, the theme/store config, the nav map, stock arithmetic, the stylesheet. |
+| `src/lib/*.js` | unchanged — pure domain logic, no React. |
+
+**Every view is `React.lazy`.** The switch in the shell holds a `lazy(() => import(...))` per
+screen and one `<Suspense>` around the rendered view, so the counter tablet downloads the till
+and the diary and never pays for the stats charts or the barcode generator. `vite build` should
+print one chunk per view; if a view's code turns up in `index-*.js` instead, something imported
+it eagerly.
+
+**Three rules that keep it that way:**
+
+1. **No view imports another view.** Anything two screens need moves to `components/` or
+   `lib/ui/` — that is what those directories are for. A view→view import silently merges two
+   chunks and can make a cycle the build won't always warn about.
+2. **Nothing under `views/`, `components/` or `lib/` imports `salon-manager.jsx`.** The shell
+   is the top of the graph.
+3. **`eslint` cannot see a missing component.** `no-undef` works on identifiers, and `<Header/>`
+   is a JSXIdentifier — a component used only in JSX and never imported passes lint and throws
+   at render. If you move a component between files, the check that catches it is running the
+   app (or a jsdom suite that mounts the view), not the linter.
+
+The four full-app jsdom suites call `preloadViews()` — an `import.meta.glob` over `src/views/`
+— before mounting. Without it `React.lazy` races a real dynamic import inside `act()`, which no
+number of ticks reliably wins: loading a module is file I/O, not a queued task. It also means
+every view module is *evaluated* in those suites, so a module-init error in any screen fails
+the suite the same way `app.smoke.test.jsx` catches one in the shell.
+
 ## The vendored xlsx tarball
 
 `xlsx` (SheetJS) is **not on the npm registry**. It used to be installed straight from the
@@ -153,9 +191,9 @@ README:
 
 ## Sending a bill on WhatsApp
 
-One receipt layout, two deliveries. `receiptHtml()` in `salon-manager.jsx` is the **single
-source** of receipt markup; `printReceipt()` sends it to paper and `SendBillActions` rasterizes
-it to a JPEG. Anything added to one is in the other for free — that is the whole point of the
+One receipt layout, two deliveries. `receiptHtml()` in
+[`src/components/receipt.jsx`](src/components/receipt.jsx) is the **single source** of receipt
+markup; `printReceipt()` sends it to paper and `SendBillActions` rasterizes it to a JPEG. Anything added to one is in the other for free — that is the whole point of the
 split, so don't inline receipt markup into a caller.
 
 | Where | What |
@@ -245,7 +283,8 @@ Two independent axes, both synced (shop-wide, owner-set in Settings) and both ap
 `--focus-ring` **inline**, and inline always beats a stylesheet rule — so the Advanced block can
 **never** override those, and deliberately doesn't. Advanced defines only its *own* tokens
 (`--bg-base`, `--glass-*`, `--accent`, `--surface`, `--text-*`, …) in the `[data-theme="advanced"]`
-block in `salon-manager.jsx`. Result: the chosen colour palette still tints the accents showing
+block in [`src/lib/ui/css.js`](src/lib/ui/css.js) (`themeVars` and `THEMES` live next door in
+[`src/lib/ui/store.js`](src/lib/ui/store.js)). Result: the chosen colour palette still tints the accents showing
 through the dark glass.
 
 **Pixel-identical Basic is by construction.** Every themeable surface reads a token with its
@@ -292,8 +331,9 @@ zoom on every input.
 
 ### Four things that will bite
 
-1. **A media query loses to an inline style.** Most layout in `salon-manager.jsx` is inline
-   (`S.nav`, `S.main`, `S.app`, the ~54 inline grids), and a normal stylesheet declaration cannot
+1. **A media query loses to an inline style.** Most layout is inline — `S` in
+   [`src/lib/ui/css.js`](src/lib/ui/css.js) (`S.nav`, `S.main`, `S.app`) plus the ~54 grids
+   written inline in the views — and a normal stylesheet declaration cannot
    beat one. Every responsive rule that restyles an inline-styled element therefore carries
    `!important` — that is the *only* thing it is used for here, never to win a fight inside the CSS
    block. Miss it and the change silently does nothing: the 210px rail just stays put on a phone.
@@ -341,8 +381,9 @@ horizontal-overflow bug that actually ruins a phone.
 
 - `src/lib/*.js` is pure logic — no React, no Firebase (except the thin `firebase.js` /
   `sync.js` / `bills.js` adapters). Keep it that way; it's why those suites are fast.
-- `src/components/` is the only UI outside `salon-manager.jsx`, and exists for things with
-  their own stylesheet (the icon set). Screens stay in the big file.
+- Screens live in `src/views/`, shared UI in `src/components/`, shared non-React UI logic in
+  `src/lib/ui/` — see "Where things live" above, including why a moved component can pass lint
+  and still throw.
 - Money is paise-rounded rupees; dates are local-timezone.
 - **Nothing that matters is a running total.** Visit counts, spend, loyalty points, tier and
   package sessions are derived from the bills and recomputed, never incremented. The README
