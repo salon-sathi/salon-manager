@@ -107,7 +107,7 @@ describe("the service worker's own rules", () => {
     ].forEach((h) => expect(re.test(h), `${h} must bypass the cache`).toBe(true));
 
     // …and does not accidentally swallow the app's own origin.
-    ["localhost", "s123dive-web.github.io"].forEach((h) =>
+    ["localhost", "salon-sathi.github.io"].forEach((h) =>
       expect(re.test(h), `${h} is the app itself`).toBe(false)
     );
   });

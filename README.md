@@ -485,7 +485,8 @@ Until that's set, every run fails at the `configure-pages` step with a **403**, 
 the build and the tests have all passed — the workflow is fine, the repository just has nowhere
 to publish to. Re-run the latest workflow (or push any commit) once it's enabled.
 
-The site then lands at `https://<user>.github.io/salon-manager/`. A fork publishes with the
+The site then lands at `https://<owner>.github.io/salon-manager/` — for this repository,
+**<https://salon-sathi.github.io/salon-manager/>**. A fork publishes with the
 committed config still in it, so it will sign in against **the author's project** and then be
 denied every read — put your own project in [`src/lib/firebase.js`](src/lib/firebase.js) before
 you point a salon at it (see

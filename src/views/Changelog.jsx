@@ -8,7 +8,7 @@ import CHANGELOG_DATA from "virtual:changelog";
 // Data comes from git history at build time (scripts/vite-changelog-plugin.js) — CI/deploy noise is
 // filtered out there, so nothing here is hand-maintained. The fallback URL only matters if the build
 // had no git remote; entries are simply empty in that case and the section shows an empty state.
-const REPO_URL = CHANGELOG_DATA.repoUrl || "https://github.com/s123dive-web/salon-manager";
+const REPO_URL = CHANGELOG_DATA.repoUrl || "https://github.com/salon-sathi/salon-manager";
 const CHANGELOG = CHANGELOG_DATA.entries || [];
 
 function Changelog() {
