@@ -1,0 +1,58 @@
+name: End-to-end tests
+
+# Deliberately NOT part of deploy.yml. That workflow's `npm test` gates the Pages deploy, and
+# folding a browser suite into it would let a flaky click block a release. This runs alongside
+# it and reports on its own.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight run on the same ref; main is left alone so every
+# deployed commit keeps its own result.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Same reason as deploy.yml: npm 11 skips esbuild's foreign-platform optional deps,
+          # npm 10 errors EBADPLATFORM on them.
+          node-version: 24
+          cache: npm
+
+      # The Realtime Database emulator is a JAR and firebase-tools 15 refuses anything before
+      # 21 ("no longer supports Java version before 21"). The runner image ships several JDKs,
+      # so pin the one we need rather than inheriting whichever is default this month.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+
+      # Chromium only — the suite declares a single project. --with-deps pulls the shared
+      # libraries headless Chromium needs, which the runner image does not all carry.
+      - run: npx playwright install --with-deps chromium
+
+      # Brings up the auth, database and storage emulators, starts its own dev server on 5174
+      # with VITE_USE_EMULATORS set, and runs the suite against them. Nothing here can reach
+      # the live project: the accounts it signs in with exist only in the auth emulator.
+      - run: npm run test:e2e
+
+      # The report carries the screenshot, video and trace for every failure, which is the
+      # difference between "a click timed out" and knowing what the page looked like.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
