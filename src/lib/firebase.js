@@ -18,9 +18,9 @@
 // grocery-store-manager uses, so sharing one project would have the two overwrite each
 // other's live data.
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getDatabase } from "firebase/database";
-import { getStorage } from "firebase/storage";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { connectDatabaseEmulator, getDatabase } from "firebase/database";
+import { connectStorageEmulator, getStorage } from "firebase/storage";
 
 // Project: salon-manager-49a88 (Realtime Database in asia-southeast1 / Singapore).
 // This is Salon Manager's OWN project — deliberately not the one grocery-store-manager uses,
@@ -57,6 +57,41 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getDatabase(app);
 export const storage = getStorage(app);
+
+// ---- local emulators ----------------------------------------------------------------
+// Set VITE_USE_EMULATORS=1 to point auth, the database and storage at the local Firebase
+// emulator suite instead of the live project above. The end-to-end suite (see e2e/) always
+// sets it; `npm run dev` does not, so ordinary development still talks to the real project.
+//
+// This exists because the config above is a REAL salon's data. Without a switch, any test
+// that signs in and clicks through the app writes live appointments and live bills. The
+// emulator is entirely local — it never contacts the project, whatever id it is run under.
+//
+// What actually protects a test run is NOT this flag on its own. The flag failing to arrive
+// is an invisible failure: the app would quietly use the live project and the suite would
+// pass while corrupting real data. The protection is that the e2e accounts exist ONLY in the
+// auth emulator (e2e/fixtures/seed.js creates them on a database that is wiped every run).
+// Point the suite at production by mistake and sign-in fails on the first spec, loudly.
+// Keep it that way: never create these accounts in the live project, however convenient.
+//
+// The deploy workflow does not set the variable, so a production build cannot reach here.
+export const usingEmulators = import.meta.env.VITE_USE_EMULATORS === "1";
+
+if (usingEmulators) {
+  // Defaults match firebase.json. Vite only substitutes STATICALLY-written import.meta.env
+  // keys, so these cannot be looked up through a helper with a computed name.
+  const host = import.meta.env.VITE_EMULATOR_HOST || "127.0.0.1";
+  const authPort = Number(import.meta.env.VITE_EMULATOR_AUTH_PORT || 9099);
+  const dbPort = Number(import.meta.env.VITE_EMULATOR_DB_PORT || 9000);
+  const storagePort = Number(import.meta.env.VITE_EMULATOR_STORAGE_PORT || 9199);
+
+  // disableWarnings silences the emulator's banner, which otherwise overlays the page and
+  // sits on top of the sign-in button — Playwright clicks it instead of the button.
+  connectAuthEmulator(auth, `http://${host}:${authPort}`, { disableWarnings: true });
+  connectDatabaseEmulator(db, host, dbPort);
+  connectStorageEmulator(storage, host, storagePort);
+  console.info(`[salon-manager] using Firebase emulators at ${host} (auth ${authPort}, db ${dbPort}, storage ${storagePort})`);
+}
 
 // Creating a user with the client SDK signs that new user in, which would kick the owner
 // out of their own session. The standard workaround is a SECOND, throwaway app instance:

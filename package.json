@@ -11,7 +11,11 @@
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rules": "firebase emulators:exec --only database,auth --project salon-manager-rules-test \"vitest run --config vitest.rules.config.js\""
+    "test:rules": "firebase emulators:exec --only database,auth --project salon-manager-rules-test \"vitest run --config vitest.rules.config.js\"",
+    "test:e2e": "firebase emulators:exec --only auth,database,storage --project salon-manager-49a88 \"playwright test\"",
+    "test:e2e:ui": "firebase emulators:exec --only auth,database,storage --project salon-manager-49a88 \"playwright test --ui\"",
+    "test:e2e:headed": "firebase emulators:exec --only auth,database,storage --project salon-manager-49a88 \"playwright test --headed\"",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "firebase": "^12.14.0",
@@ -26,6 +30,7 @@
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/test": "^1.62.1",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.17.0",
     "eslint-plugin-react": "^7.37.2",

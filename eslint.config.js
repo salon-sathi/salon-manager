@@ -4,7 +4,10 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default [
-  { ignores: ["dist/", "node_modules/"] },
+  // Flat config does NOT read .gitignore, so build and test output has to be listed here as
+  // well. Playwright's HTML report ships a bundled, minified app inside it — lint it and you
+  // get ~650 errors from somebody else's build artefact.
+  { ignores: ["dist/", "node_modules/", "playwright-report/", "test-results/", "blob-report/"] },
   js.configs.recommended,
   {
     files: ["**/*.{js,jsx}"],
@@ -44,6 +47,12 @@ export default [
         __VERSION__: "readonly",
       },
     },
+  },
+  {
+    // The end-to-end suite and its Playwright config are Node. The specs also run code
+    // inside the browser via page.evaluate, so they need both global sets.
+    files: ["e2e/**/*.js", "playwright.config.js"],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     // The rules suite is Node, not a browser, and it is not React. `useRulesHarness()` is a

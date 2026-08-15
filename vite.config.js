@@ -33,6 +33,11 @@ export default defineConfig(({ command, isPreview }) => ({
     // tests/rules/** talks to the Firebase emulator, so it cannot run under a plain
     // `npm test` — it lives behind `npm run test:rules` (vitest.rules.config.js) and is
     // excluded here to keep the pure-lib suites dependency-free.
-    exclude: ["**/node_modules/**", "**/dist/**", "tests/rules/**"],
+    //
+    // e2e/** is excluded for the same reason and one more: those specs are written for the
+    // Playwright runner, and Vitest's default include (**/*.spec.js) would otherwise pick
+    // them up and fail on `import { test } from "@playwright/test"`. They run under
+    // `npm run test:e2e`, which brings up the emulator and a dev server first.
+    exclude: ["**/node_modules/**", "**/dist/**", "tests/rules/**", "e2e/**"],
   },
 }));

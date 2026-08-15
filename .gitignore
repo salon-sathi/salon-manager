@@ -11,3 +11,9 @@ yarn-error.log*
 # Firebase emulator scratch (see "Rules testing" in the README)
 .firebase/
 *-debug.log
+
+# Playwright: run artefacts and the downloaded browsers' local state.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
