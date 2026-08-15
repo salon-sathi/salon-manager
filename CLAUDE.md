@@ -11,6 +11,7 @@ wrong when working in the repo.
 | `npm run dev` | Vite dev server on 5173 |
 | `npm test` | the pure-lib + jsdom suites (`src/**`). No emulator, no Java. This is what CI runs. |
 | `npm run test:rules` | the security-rules suite (`tests/rules/**`) against the Firebase emulator |
+| `npm run test:e2e` | the Playwright end-to-end suite (`e2e/**`) — real Chromium, real app, emulator data. CI runs it in its own workflow ([`e2e.yml`](.github/workflows/e2e.yml)), never on the deploy path. |
 | `npm run build` | production build (Pages base path `/salon-manager/`) |
 | `npm run lint` / `npm run format` | ESLint / Prettier |
 
@@ -129,8 +130,11 @@ is only the UI mirror of it. The rules are exercised by:
 
 Config lives in [`vitest.rules.config.js`](vitest.rules.config.js), not `vite.config.js`.
 
-**Java 11+ must be on `PATH`** — the RTDB emulator is a JAR. Without it the command stops at
-`Could not spawn 'java -version'`.
+**Java 21+ must be on `PATH`** — the RTDB emulator is a JAR. Without it the command stops at
+`Could not spawn 'java -version'`; with a JDK older than 21, `firebase-tools` (15.x) refuses
+outright: *"firebase-tools no longer supports Java version before 21."* A JRE is enough, and
+it only has to be on `PATH` for the emulator process — nothing in the app or the build needs
+one.
 
 ### Emulator ports
 
@@ -141,6 +145,7 @@ address `emulators:exec` exports and only falls back to these literals.
 |---|---|
 | Realtime Database | 9000 |
 | Authentication | 9099 |
+| Storage | 9199 |
 | Emulator UI | 4000 |
 | Emulator hub (CLI-assigned) | 4400 |
 
@@ -223,6 +228,109 @@ README:
 - **The rules let the last active owner demote/deactivate/delete themselves.** The app
   refuses this; the rules cannot express it (RTDB has no way to count siblings matching a
   predicate). Closing it server-side needs a maintained counter node or a Cloud Function.
+
+## End-to-end tests (Playwright)
+
+`e2e/**` drives the **real app in a real Chromium** against the Firebase emulator. It covers
+what jsdom structurally cannot: layout, the service worker, canvas/`foreignObject`
+rasterization, print, and the actual `database.rules.json` boundary in the same request path
+the salon uses.
+
+| Where | What |
+|---|---|
+| [`playwright.config.js`](playwright.config.js) | runner config + the `webServer` that starts the dev server |
+| [`e2e/global-setup.js`](e2e/global-setup.js) | reachability check, then seeds the roster once |
+| [`e2e/fixtures/seed.js`](e2e/fixtures/seed.js) | emulator REST: wipe, create accounts, seed `shop/users` |
+| [`e2e/fixtures/salon.js`](e2e/fixtures/salon.js) | the shop under test — two stylists, three services, fixed ids |
+| [`e2e/fixtures/app.js`](e2e/fixtures/app.js) | `signIn()`, `navItem()`, console/exception watching |
+
+The specs: `smoke` (the rig), `auth` (sign-in + the role gate), `appointments` (the diary and
+its overlap check), `billing` (the money, print, and the receipt JPEG), `loyalty` (points,
+tiers, prepaid packages), `inventory` (stock movement).
+
+**Reconciled slices are reset per test, not per run.** `customers`, `customerPackages` and
+`items` are all rewritten by the app — `reconcileLoyalty` and `reconcilePackages` recompute
+loyalty points, tier and `usesLeft` from the bills on every sync, and billing depletes stock.
+A spec that wants a known starting point has to reseed in `beforeEach`. It also means a
+loyalty assertion must seed the **bills** and read the derived field: seeding `loyaltyPoints`
+directly and reading it back would pass on an app that had quietly gone back to incrementing a
+stored counter, which is the one regression this design exists to prevent.
+
+```bash
+npm run test:e2e          # headless, brings up the emulator itself
+npm run test:e2e:ui       # time-travel UI — DOM snapshot per action
+npm run test:e2e:headed   # visible browser
+npm run test:e2e:report   # last HTML report
+```
+
+**Java 21+ must be on `PATH`**, same as the rules suite — the RTDB emulator is a JAR. The
+*auth* emulator is Node and starts without one, which is the confusing part: sign-in appears
+to work while every database read hangs at "Checking your access…". `global-setup.js` checks
+both emulators up front and says so, rather than letting it surface as an auth timeout.
+
+**The app has to be pointed at the emulator, and that is a code path, not a config file.**
+`VITE_USE_EMULATORS=1` makes [`src/lib/firebase.js`](src/lib/firebase.js) call
+`connectAuthEmulator`/`connectDatabaseEmulator`/`connectStorageEmulator`; without it the app
+talks to the **live salon's project**. The flag is dead-code-eliminated from a production
+build (the deploy workflow never sets it), but the flag is *not* what protects a test run —
+the flag silently failing to arrive is the dangerous case. What protects it is that the e2e
+accounts exist **only in the auth emulator**: point the suite at production and sign-in fails
+on the first spec. Never create those accounts in the live project.
+
+### Six things that will bite
+
+1. **The suite runs on port 5174, and never reuses a running server.** `npm run dev` on 5173
+   talks to production. `reuseExistingServer: true` plus a dev server someone left open is
+   how a suite ends up writing real bills; the separate port removes the collision entirely.
+2. **`--host 127.0.0.1` on the dev command is load-bearing.** Vite otherwise binds
+   `localhost`, which resolves to `[::1]` **only** — a `127.0.0.1` baseURL then gets
+   ECONNREFUSED inside `webServer`'s readiness check and the run dies before the first spec.
+3. **`e2e/**` is excluded from `npm test`** (in `vite.config.js`). Vitest's default include
+   matches `*.spec.js`, so without the exclusion it picks these up and fails on
+   `import { test } from "@playwright/test"`. CI's deploy job runs `npm test`, so this
+   exclusion is what keeps a browser suite off the Pages deploy path.
+4. **One worker, and it has to stay that way.** The emulator is a single shared, stateful
+   process and the fixtures wipe the whole database — parallel spec files delete each other's
+   data mid-assertion. Same constraint as the rules suite, same reason.
+5. **There are no routes.** Navigation is `tab` state in the shell, so nothing is
+   deep-linkable: every spec signs in and clicks, and pays that cost. Sign-in state lives in
+   **IndexedDB** (the Firebase SDK's default persistence), so switching role means a fresh
+   browser context — clearing cookies and `localStorage` does *not* sign the previous user out.
+
+6. **Assertions against the database must POLL.** Every slice write is debounced by 300ms
+   (`setTimeout(() => pushSlice(…), 300)` in the shell) and then round-trips to the emulator,
+   while the UI updates from React state at once. Reading `shop/<slice>` the moment a change
+   appears on screen reads the state from *before* the write — which fails as stale data, or
+   worse passes for a delete that had not happened yet. Use `expect.poll`, never a sleep. The
+   same 300ms is why a spec that reloads the page has to wait for the write first, or it
+   discards a record that only ever existed in React state.
+
+**The receipt specs stub two browser APIs, and both stubs are load-bearing.**
+`billing.spec.js` overrides `window.print` via `addInitScript` — which runs in *every* frame,
+including the `srcdoc` print frame where `print()` is actually called — so the suite never
+waits on headless Chromium's print implementation. It also stubs `navigator.share` /
+`canShare`, which are absent in headless: without them `canShareImages()` is false and the
+Share button never renders, so there is nothing to click. The stub captures the `File`'s first
+bytes rather than just its existence, because a *tainted* canvas (any remote `<img>` inside
+the SVG) makes `toBlob` throw and a blank render still encodes to a valid, tiny JPEG — the
+`FF D8 FF` check plus a size floor is what separates "a Blob arrived" from "a receipt
+arrived". Pinned by mutation: neutering `toXhtml` makes that spec fail.
+
+**The database namespace is derived, not typed.** `seed.js` parses `databaseURL` out of
+`src/lib/firebase.js` and takes its first hostname label — `salon-manager-49a88-default-rtdb`,
+which is what `connectDatabaseEmulator` keeps when it swaps in the emulator's host:port
+(verified against the SDK's actual `ns=` parameter). A hardcoded copy would not error if it
+drifted: the emulator creates any namespace on demand, so the roster would land beside the one
+the app reads, the app would find `shop/users` empty, and **whoever signed in first would be
+bootstrapped as owner** — every role spec passing for the wrong reason. `seedRoster()` reads
+back what it wrote, and `smoke.spec.js` asserts a biller *cannot* see the owner-only Settings
+tab, which is the assertion that actually catches it.
+
+**Selectors: roles and text first, `data-testid` only where text is ambiguous.** The nav
+already exposes `aria-label` on every destination and the login fields are wrapped in their
+`<label>`, so `getByRole`/`getByLabel` work without touching components. Adding testids
+wholesale would mean editing all 22 views for no gain; add one only where a name genuinely
+repeats (the calendar grid, duplicate "Save" buttons, the POS service tiles).
 
 ## Sending a bill on WhatsApp
 
