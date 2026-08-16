@@ -65,6 +65,10 @@ export const BOOKING_DEFAULTS = {
   // How long to set aside for a booking. The customer does not choose services — the whole
   // point of the link is four fields and a tap — so there is nothing to derive a length from.
   slotMinutes: 30,
+  // How far apart the offered times are. An hour by default: a customer choosing from ten
+  // round times decides in a second, where forty-four quarter-hours is a wall of buttons. The
+  // salon still books to the minute at the counter — this is only what the link offers.
+  stepMinutes: 60,
   // The SALON's zone, not the device's. See timeZoneFor() below for why this is a setting.
   timeZone: "",
   noticeText: "",
@@ -87,6 +91,7 @@ export function bookingSettings(config) {
     // Kept on the 15-minute diary grid, so an online booking lines up with the rows the desk
     // reads rather than sitting half a row off every block around it.
     slotMinutes: Math.min(480, Math.max(SLOT_MIN, Math.round(num(c.slotMinutes ?? BOOKING_DEFAULTS.slotMinutes) / SLOT_MIN) * SLOT_MIN)),
+    stepMinutes: Math.min(240, Math.max(SLOT_MIN, Math.round(num(c.stepMinutes ?? BOOKING_DEFAULTS.stepMinutes) / SLOT_MIN) * SLOT_MIN)),
     timeZone: str(c.timeZone),
     noticeText: str(c.noticeText).slice(0, 200),
   };
@@ -371,6 +376,7 @@ export function buildProfile(store, config, { updatedAt = "", timeZone = "" } = 
     leadMinutes: rules.leadMinutes,
     horizonDays: rules.horizonDays,
     slotMinutes: rules.slotMinutes,
+    stepMinutes: rules.stepMinutes,
     noticeText: rules.noticeText,
     updatedAt: str(updatedAt),
   };

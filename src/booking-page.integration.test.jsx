@@ -39,7 +39,7 @@ const PROFILE = {
   name: "Glow Salon", tagline: "Hair · Skin · Nails", address: "12 MG Road, Pune",
   phone: "+91 98765 43210", mapsUrl: "https://maps.app.goo.gl/glow", theme: "emerald",
   timeZone: "Asia/Kolkata", openMin: 600, closeMin: 1260,
-  enabled: true, capacity: 3, leadMinutes: 60, horizonDays: 7, slotMinutes: 30,
+  enabled: true, capacity: 3, leadMinutes: 60, horizonDays: 7, slotMinutes: 30, stepMinutes: 60,
   noticeText: "Please arrive 5 minutes early",
 };
 
@@ -168,10 +168,12 @@ describe("the shop, and only the shop", () => {
     expect(link(c, /Get directions/)).toBeUndefined();
   });
 
-  it("shows the salon's own notice", () => {
+  it("holds the salon's notice back until the booking is made", () => {
+    // Before booking it is one more thing to read past; after booking it is the instruction the
+    // customer has to act on, on the screen they will screenshot.
     const c = mount();
     publish();
-    expect(text(c)).toMatch(/arrive 5 minutes early/i);
+    expect(text(c)).not.toMatch(/arrive 5 minutes early/i);
   });
 });
 
@@ -183,6 +185,11 @@ describe("picking a time", () => {
     publish();
     expect(times(c).length).toBeGreaterThan(0);
     expect(times(c)[0]).toBe("10:00 am");
+    // On the hour by default — a handful of round times, not forty-four quarter-hours.
+    expect(times(c)).toEqual([
+      "10:00 am", "11:00 am", "12:00 pm", "1:00 pm", "2:00 pm",
+      "3:00 pm", "4:00 pm", "5:00 pm", "6:00 pm", "7:00 pm", "8:00 pm",
+    ]);
   });
 
   it("never asks which services the customer wants", () => {
@@ -192,34 +199,61 @@ describe("picking a time", () => {
     expect(text(c)).not.toMatch(/service/i);
   });
 
-  it("asks for four things and nothing else", () => {
+  it("asks for four things and nothing else, name and number FIRST", () => {
+    // Asked the other way round, a customer picks a slot, gets asked who they are, and the slot
+    // can go while they are typing. Name and number are the part that never expires.
     const c = mount();
     publish();
-    // Two text inputs, and the day/time grids. Anything more is a click the customer did not
-    // need to make.
     const labels = [...c.querySelectorAll("label")].map((l) => l.textContent.trim());
     expect(labels).toEqual(["Your name", "Mobile number"]);
+    const nameBox = field(c, /Your name/);
+    const grid = group(c, "Choose a day");
+    // DOCUMENT_POSITION_FOLLOWING: the day strip comes after the name field in the document.
+    expect(nameBox.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("offers times every hour, or whatever the salon set", () => {
+    const c = mount();
+    publish({ profile: { ...PROFILE, stepMinutes: 30 } });
+    expect(times(c).slice(0, 3)).toEqual(["10:00 am", "10:30 am", "11:00 am"]);
   });
 
   it("holds every booking for the length the owner set", () => {
     const c = mount();
     publish({ profile: { ...PROFILE, slotMinutes: 60 } });
-    // 60 minutes against a 21:00 close: the last start that still finishes on time is 20:00.
-    expect(times(c).at(-1)).toBe("8:00 pm");
+    expect(times(c).at(-1)).toBe("8:00 pm"); // 60 min against a 21:00 close
   });
 
   it("never offers a slot that would run past closing time", () => {
     const c = mount();
-    publish();
+    publish({ profile: { ...PROFILE, stepMinutes: 30 } });
     expect(times(c).at(-1)).toBe("8:30 pm"); // 30 min, closing at 21:00
+  });
+
+  it("never offers a time that has already gone today", () => {
+    // The salon's clock, not the browser's. 15:20 in Kolkata with no notice period: 3pm has
+    // gone, 4pm has not.
+    Date.now.mockReturnValue(Date.UTC(2026, 7, 16, 9, 50, 0));
+    const c = mount();
+    publish({ profile: { ...PROFILE, leadMinutes: 0 } });
+    expect(times(c)).not.toContain("3:00 pm");
+    expect(times(c)[0]).toBe("4:00 pm");
+  });
+
+  it("keeps the whole day open on a later date, however late it is today", () => {
+    Date.now.mockReturnValue(Date.UTC(2026, 7, 16, 14, 30, 0)); // 20:00 in Kolkata
+    const c = mount();
+    publish({ profile: { ...PROFILE, leadMinutes: 0 } });
+    act(() => groupButtons(c, "Choose a day")[1].click());
+    expect(times(c)[0]).toBe("10:00 am");
   });
 
   it("honours the notice period on today", () => {
     Date.now.mockReturnValue(Date.UTC(2026, 7, 16, 6, 10, 0)); // 11:40 in the salon's zone
     const c = mount();
     publish();
-    // 11:40 + an hour's notice = 12:40, and the grid steps on the quarter hour.
-    expect(times(c)[0]).toBe("12:45 pm");
+    // 11:40 + an hour's notice = 12:40, and the grid steps on the hour.
+    expect(times(c)[0]).toBe("1:00 pm");
   });
 
   it("does not apply the notice period to a later day", () => {
@@ -232,8 +266,8 @@ describe("picking a time", () => {
 
   it("hides a slot the salon is already full for, and keeps the ones around it", () => {
     const c = mount();
-    publish({ slots: { [TODAY]: busyAt(720, 30) } }); // three in the chair at noon, capacity 3
-    expect(times(c)).not.toContain("12:00 pm");
+    publish({ profile: { ...PROFILE, stepMinutes: 30 }, slots: { [TODAY]: busyAt(720, 30) } });
+    expect(times(c)).not.toContain("12:00 pm"); // three in the chair at noon, capacity 3
     expect(times(c)).toContain("12:30 pm"); // back-to-back is free again
   });
 
@@ -318,6 +352,7 @@ describe("confirming", () => {
     expect(text(c)).toMatch(/you're booked/i);
     expect(text(c)).toContain("12:00 pm");
     expect(text(c)).toContain("9876500001");
+    expect(text(c)).toMatch(/arrive 5 minutes early/i); // the salon's line, where it matters
   });
 
   it("re-checks availability at the last moment and backs off if the slot went", async () => {

@@ -80,6 +80,7 @@ export default function BookingPage() {
   // One length for every online booking, set by the owner. There is nothing to derive it from
   // when the customer isn't choosing services, and guessing per booking would be worse.
   const durationMin = Math.max(SLOT_MIN, Number(profile?.slotMinutes) || 30);
+  const stepMinutes = Math.max(SLOT_MIN, Number(profile?.stepMinutes) || 60);
 
   // Keep the chosen day inside the window the salon actually offers. This is a re-seed, not
   // just a default: a page left open past midnight would otherwise still be pointing at
@@ -95,10 +96,14 @@ export default function BookingPage() {
       closeMin: profile.closeMin,
       durationMin,
       capacity: profile.capacity,
-      // Only today is bounded by the notice period; a later day is open from opening time.
+      step: stepMinutes,
+      // TODAY is bounded by the clock: a time that has already gone is not a time you can book,
+      // and the notice period pushes the first offer further out on top of that. Any later day
+      // is open from opening time. `nowMs` ticks every minute, so a slot that falls behind the
+      // cutoff while the page sits open disappears from the grid on its own.
       minStartMin: date === today ? minutesInZone(nowMs, timeZone) + (profile.leadMinutes || 0) : -Infinity,
     });
-  }, [open, date, today, nowMs, timeZone, slots, chairIds, durationMin, profile]);
+  }, [open, date, today, nowMs, timeZone, slots, chairIds, durationMin, stepMinutes, profile]);
 
   // A chosen time that stops being available — because somebody else booked it, or because the
   // notice window rolled past it — has to let go of itself, or Confirm would send a slot the
@@ -188,6 +193,10 @@ export default function BookingPage() {
             Booked for <b>{done.customerName}</b> on {done.customerPhone}. The salon can see it
             already — they'll call if anything needs changing. To cancel or move it, give them a ring.
           </p>
+          {/* The salon's own line lands HERE rather than at the top of the page. Before booking
+              it is one more thing to read past; after booking it is the one instruction the
+              customer actually has to act on, on the screen they will screenshot. */}
+          {profile?.noticeText && <p className="bk-notice bk-notice-done">{profile.noticeText}</p>}
           {mapsUrl && <a className="bk-btn bk-ghost" href={mapsUrl} target="_blank" rel="noopener noreferrer">📍 Get directions</a>}
         </div>
       </main>
@@ -216,10 +225,24 @@ export default function BookingPage() {
   return shell(
     <main className="bk-wrap">
       {header}
-      {profile.noticeText && <p className="bk-notice">{profile.noticeText}</p>}
+
+      {/* Details first, then the time. Asked the other way round, a customer picks a slot, gets
+          asked who they are, and the slot they chose can go while they are typing. Name and
+          number are the part that never expires. */}
+      <section className="bk-card">
+        {step(1, "Your details")}
+        <label className="bk-field">
+          <span>Your name</span>
+          <input value={name} maxLength={60} autoComplete="name" onChange={(e) => { setName(e.target.value); setErr(""); }} />
+        </label>
+        <label className="bk-field">
+          <span>Mobile number</span>
+          <input value={phone} type="tel" inputMode="numeric" autoComplete="tel" placeholder="10-digit mobile" onChange={(e) => { setPhone(e.target.value); setErr(""); }} />
+        </label>
+      </section>
 
       <section className="bk-card">
-        {step(1, "When suits you?")}
+        {step(2, "When suits you?")}
         <div className="bk-days" role="group" aria-label="Choose a day">
           {days.map((d) => (
             <button
@@ -248,18 +271,6 @@ export default function BookingPage() {
             ))}
           </div>
         )}
-      </section>
-
-      <section className="bk-card">
-        {step(2, "Your details")}
-        <label className="bk-field">
-          <span>Your name</span>
-          <input value={name} maxLength={60} autoComplete="name" onChange={(e) => { setName(e.target.value); setErr(""); }} />
-        </label>
-        <label className="bk-field">
-          <span>Mobile number</span>
-          <input value={phone} type="tel" inputMode="numeric" autoComplete="tel" placeholder="10-digit mobile" onChange={(e) => { setPhone(e.target.value); setErr(""); }} />
-        </label>
 
         {startMin != null && (
           <p className="bk-confirm-line">

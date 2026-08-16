@@ -71,6 +71,12 @@ export const CSS = `
   background: var(--bk-surface); border: 1px solid var(--bk-line); border-left: 4px solid var(--brand, #1B5E43);
   border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 13.5px;
 }
+/* On the confirmation the notice is the one thing left to act on, so it reads as an
+   instruction rather than as another panel: centred with the rest of the card, and tinted. */
+.bk-notice-done {
+  background: color-mix(in srgb, var(--brand, #1B5E43) 8%, transparent);
+  text-align: center; margin: 14px 0 4px; font-weight: 600;
+}
 
 .bk-step { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px; }
 .bk-step h2 { font-size: 17px; font-weight: 700; }

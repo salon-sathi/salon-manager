@@ -50,6 +50,8 @@ const PROFILE = {
   leadMinutes: 0,
   horizonDays: 7,
   slotMinutes: 30,
+  // Every 15 minutes, so the capacity spec can still assert an adjacent slot.
+  stepMinutes: 15,
   noticeText: "Please arrive 5 minutes early",
 };
 
@@ -83,11 +85,12 @@ const times = (page) => page.getByRole("group", { name: "Choose a time" }).getBy
 
 /** Fill the whole form and confirm. Returns the time chosen. */
 async function book(page, { name = "E2E Riya", phone = "9876500055", at } = {}) {
+  // Details first, then the time — the order the page actually asks for them.
+  await page.getByLabel("Your name").fill(name);
+  await page.getByLabel("Mobile number").fill(phone);
   const slot = at ? times(page).filter({ hasText: at }) : times(page).first();
   const label = (await slot.textContent()).trim();
   await slot.click();
-  await page.getByLabel("Your name").fill(name);
-  await page.getByLabel("Mobile number").fill(phone);
   await page.getByRole("button", { name: "Confirm booking" }).click();
   return label;
 }
@@ -102,7 +105,6 @@ test.describe("the page a customer sees", () => {
     await expect(page.getByText(PROFILE.address)).toBeVisible();
     await expect(page.getByRole("link", { name: /Get directions/ })).toHaveAttribute("href", PROFILE.mapsUrl);
     await expect(page.getByRole("link", { name: /Call the salon/ })).toHaveAttribute("href", "tel:+919876543210");
-    await expect(page.getByText(PROFILE.noticeText)).toBeVisible();
 
     // The requirement in one assertion: the shop, not the staff.
     const body = await page.locator("body").innerText();
@@ -158,6 +160,8 @@ test.describe("booking", () => {
     const at = await book(cust, { name: "E2E Riya", phone: "9876500055" });
     await expect(cust.getByRole("heading", { name: /You're booked/i })).toBeVisible();
     await expect(cust.getByText(at)).toBeVisible();
+    // The salon's own line lands on the confirmation, where the customer will screenshot it.
+    await expect(cust.getByText(PROFILE.noticeText)).toBeVisible();
 
     // Poll: the customer's write round-trips, then a staff device imports it on a second one.
     await expect
@@ -209,9 +213,9 @@ test.describe("booking", () => {
 
   test("a customer cannot book when the salon has switched the link off, even mid-session", async ({ browser }) => {
     const { context, page } = await customer(browser);
-    await times(page).first().click();
     await page.getByLabel("Your name").fill("E2E Latecomer");
     await page.getByLabel("Mobile number").fill("9876500077");
+    await times(page).first().click();
 
     // The owner switches it off while this page sits open with a slot chosen.
     await seed("shop/public/profile", { ...PROFILE, enabled: false });

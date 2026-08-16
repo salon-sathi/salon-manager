@@ -352,6 +352,7 @@ function OnlineBooking({ config, setConfig, notify, log }) {
     leadMinutes: String(current.leadMinutes),
     horizonDays: String(current.horizonDays),
     slotMinutes: String(current.slotMinutes),
+    stepMinutes: String(current.stepMinutes),
     timeZone: current.timeZone || deviceTimeZone(),
     noticeText: current.noticeText,
   }));
@@ -381,7 +382,8 @@ function OnlineBooking({ config, setConfig, notify, log }) {
     const leadMinutes = Number(draft.leadMinutes);
     const horizonDays = Number(draft.horizonDays);
     const slotMinutes = Number(draft.slotMinutes);
-    if (![capacity, leadMinutes, horizonDays, slotMinutes].every((x) => Number.isFinite(x) && x >= 0)) {
+    const stepMinutes = Number(draft.stepMinutes);
+    if (![capacity, leadMinutes, horizonDays, slotMinutes, stepMinutes].every((x) => Number.isFinite(x) && x >= 0)) {
       return notify("⚠ Every number here must be a number, and none can be negative.");
     }
     if (capacity < 1) return notify("⚠ At least 1 customer at a time, or the link can never book anything.");
@@ -394,7 +396,7 @@ function OnlineBooking({ config, setConfig, notify, log }) {
     setConfig((c) => ({
       ...c,
       onlineBooking: {
-        enabled: draft.enabled, capacity, leadMinutes, horizonDays, slotMinutes,
+        enabled: draft.enabled, capacity, leadMinutes, horizonDays, slotMinutes, stepMinutes,
         timeZone: draft.timeZone.trim(),
         noticeText: draft.noticeText.trim().slice(0, 200),
       },
@@ -438,9 +440,17 @@ function OnlineBooking({ config, setConfig, notify, log }) {
             <Field label="Notice needed (minutes)"><input className="input" inputMode="numeric" value={draft.leadMinutes} onChange={(e) => set("leadMinutes", e.target.value)} /></Field>
             <Field label="Can book this far ahead (days)"><input className="input" inputMode="numeric" value={draft.horizonDays} onChange={(e) => set("horizonDays", e.target.value)} /></Field>
           </div>
-          <div className="g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="g3" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
             <Field label="Time set aside per booking (minutes)">
               <input className="input" inputMode="numeric" value={draft.slotMinutes} onChange={(e) => set("slotMinutes", e.target.value)} />
+            </Field>
+            <Field label="Offer times every">
+              <select className="input" value={draft.stepMinutes} onChange={(e) => set("stepMinutes", e.target.value)}>
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="60">1 hour</option>
+                <option value="120">2 hours</option>
+              </select>
             </Field>
             <Field label="Your salon's timezone">
               <select className="input" value={draft.timeZone} onChange={(e) => set("timeZone", e.target.value)}>
@@ -457,9 +467,12 @@ function OnlineBooking({ config, setConfig, notify, log }) {
             <br />
             Customers aren't asked which services they want — the link is four fields and a tap —
             so every online booking is held for the <b>time set aside</b> above, and the desk adds
-            the services when they arrive. <b>Timezone</b> decides what “today” means on the
-            booking page; get it wrong and it offers customers the wrong day, so it is set here
-            rather than read off whichever device you happen to be signed in on.
+            the services when they arrive. <b>Offer times every</b> is only how far apart the
+            choices on the link are: on the hour keeps it to a handful of round times, and you can
+            still book to the minute at the counter. On today's date, anything already past is
+            never offered. <b>Timezone</b> decides what “today” means on the booking page; get it
+            wrong and it offers customers the wrong day, so it is set here rather than read off
+            whichever device you happen to be signed in on.
           </div>
           <Field label="A line for the customer (optional)">
             <input className="input" value={draft.noticeText} maxLength={200} placeholder="e.g. Please arrive 5 minutes early" onChange={(e) => set("noticeText", e.target.value)} />
