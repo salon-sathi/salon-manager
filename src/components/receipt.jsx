@@ -95,6 +95,11 @@ export function receiptHtml(sale, store = STORE, staff = [], extras = {}, { forI
   // A generated QR is a data URL and is always safe to inline; only the bundled fallback image
   // is dropped for an image export.
   const qrUrl = dynQr ? qrDataUrl(upiUri) : store.paymentQr ? store.paymentQr : forImage ? "" : assetUrl(PAYMENT_QR_SRC);
+  // The amount is captioned under EITHER QR. It used to be printed only under the encoded one,
+  // which is backwards: the static QR is precisely the case where a human has to read the figure
+  // and type it into their app. Guarded on > 0 so a fully package-redeemed bill doesn't invite
+  // anyone to "Scan to Pay ₹0" — that guard covers the encoded QR too, which drops `am` at zero.
+  const qrAmt = Number(sale.total) > 0 ? " " + INR(sale.total) : "";
   const rows = sale.lines
     .map((l) => {
       // Unit-price subline under the name: preserves the "unit price" field without a 4th column.
@@ -185,7 +190,7 @@ export function receiptHtml(sale, store = STORE, staff = [], extras = {}, { forI
     <div class="ft">Thank you! Please visit again.</div>
     ${qrUrl ? `<div class="qr">
       <img class="${dynQr ? "gen" : ""}" src="${qrUrl}" alt="Scan to pay" onerror="this.style.display='none'" />
-      <div class="cap">Scan to Pay${dynQr ? " " + INR(sale.total) : ""} · PhonePe / UPI</div>
+      <div class="cap">Scan to Pay${qrAmt} · PhonePe / UPI</div>
     </div>` : ""}
     </div>`
   );
@@ -346,6 +351,11 @@ function SendBillActions({ sale, store = STORE, staff = [], extras = {}, notify,
 // renders an amount-encoded QR (regenerated as the cart total changes) so the customer's app opens
 // pre-filled; otherwise it shows the fixed payment-QR image, exactly as before. `amount` is the
 // live bill total — 0 (empty cart) drops the `am` param, showing a plain pay-to-shop QR.
+//
+// The card is fixed white in BOTH appearances, deliberately: a QR needs its quiet zone, and a
+// scanner struggling with a tinted one is the failure nobody notices until a customer is stood at
+// the counter. Which is why the text on it is literal ink rather than `--panelhead`/`--warn` —
+// those are tuned for Advanced's dark ground (#CDBF9A, #E0B15E) and come out near-invisible here.
 function UpiQrPreview({ store, amount }) {
   // No note here: the sale isn't created until "Complete sale", so there's no bill ref yet. The
   // printed receipt (printReceipt) is where the bill ref gets stamped into the UPI note.
@@ -354,11 +364,25 @@ function UpiQrPreview({ store, amount }) {
     () => (uri ? qrDataUrl(uri) : store.paymentQr || PAYMENT_QR_SRC),
     [uri, store.paymentQr],
   );
-  const amt = uri && Number(amount) > 0 ? " " + INR(amount) : "";
+  // Captioned under either QR, for the same reason as on the receipt: the static one is exactly
+  // the case where somebody has to read the figure out loud, and a till showing no number is how
+  // that becomes a guess.
+  const due = Number(amount) > 0;
+  const amt = due ? " " + INR(amount) : "";
   return (
     <div style={{ textAlign: "center", marginTop: 10, padding: 8, background: "#fff", border: "1px solid #E2EAE3", borderRadius: 10 }}>
       <img src={src} alt="Scan to pay" style={{ width: 150, height: 150, objectFit: "contain", imageRendering: uri ? "pixelated" : "auto" }} />
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--panelhead, #3A5547)" }}>Scan to Pay{amt} · PhonePe / UPI</div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: "#3A5547" }}>Scan to Pay{amt} · PhonePe / UPI</div>
+      {/* A static image cannot carry a per-bill amount — the figure lives in the encoded URI — so
+          here the customer types it, and a typo is a short payment the salon discovers late or
+          never. Say so on the till, next to the one setting that fixes it. Shown only with a
+          total on the bill: an empty cart is a pay-to-shop QR, which is working as intended. */}
+      {!uri && due && (
+        <div style={{ fontSize: 10.5, lineHeight: 1.45, fontWeight: 600, color: "#8A5A14", marginTop: 4 }}>
+          This QR carries no amount — the customer has to enter {INR(amount)} themselves.
+          Add a UPI ID in Settings → Branding &amp; receipt to encode it on every bill.
+        </div>
+      )}
     </div>
   );
 }
