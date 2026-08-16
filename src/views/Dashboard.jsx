@@ -7,6 +7,7 @@ import { staffName } from "../lib/salon.js";
 import { inventoryValue } from "../lib/stats.js";
 import { S } from "../lib/ui/css.js";
 import { INR, dateStr, money, todayStr } from "../lib/ui/format.js";
+import { daysAgoStr, salonTodayDate } from "../lib/ui/clock.js";
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -129,18 +130,17 @@ function Dashboard({ items, sales, lowStock, goBilling, appointments = [], custo
   const monthName = new Date(date + "T00:00").toLocaleDateString("en-IN", { month: "long" });
   const niceDate = new Date(date + "T00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const trend = useMemo(() => {
-    const d = new Date(); d.setDate(d.getDate() - 13);
-    return buildSeries(sales, [], dateStr(d), todayStr());
+    return buildSeries(sales, [], daysAgoStr(13), todayStr());
   }, [sales]);
 
   // --- "Over time" charts: user picks a period, we show day-wise & week-wise series. ---
   const [period, setPeriod] = useState("7d");
-  const [customFrom, setCustomFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 6); return dateStr(d); });
+  const [customFrom, setCustomFrom] = useState(() => daysAgoStr(6));
   const [customTo, setCustomTo] = useState(todayStr());
   const range = useMemo(() => {
     if (period === "custom") return { from: customFrom, to: customTo };
     const opt = DASH_PERIODS.find((p) => p[0] === period);
-    const d = new Date(); (opt?.[2] || (() => {}))(d);
+    const d = salonTodayDate(); (opt?.[2] || (() => {}))(d);
     return { from: dateStr(d), to: todayStr() };
   }, [period, customFrom, customTo]);
   const dailySeries = useMemo(() => buildDaily(sales, range.from, range.to), [sales, range.from, range.to]);

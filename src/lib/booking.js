@@ -45,6 +45,10 @@
 
 import { SLOT_MIN, DEFAULT_HOURS, parseHM, rangesOverlap, occupiesChair, addDays } from "./appointments.js";
 import { normalizePhone, isValidPhone } from "./customers.js";
+// Re-exported so booking.js keeps its own surface: the booking page and the shell import these
+// from here, and the app's ambient clock (lib/ui/clock.js) reads the same primitives.
+export { dateInZone, minutesInZone, deviceTimeZone } from "./timezone.js";
+import { dateInZone } from "./timezone.js";
 
 const num = (v) => {
   const n = Number(v);
@@ -134,42 +138,6 @@ export function hoursFromConfig(config) {
 // yesterday. So the profile publishes the salon's IANA zone and the public page derives the day
 // and the lead-time cutoff from THAT, never from the device.
 
-/** A timestamp as YYYY-MM-DD in `timeZone`. en-CA formats exactly that way. */
-export function dateInZone(ms, timeZone) {
-  const d = new Date(num(ms));
-  if (Number.isNaN(d.getTime())) return "";
-  const opts = { year: "numeric", month: "2-digit", day: "2-digit" };
-  try {
-    return new Intl.DateTimeFormat("en-CA", { ...opts, timeZone: timeZone || undefined }).format(d);
-  } catch {
-    // An unknown zone must not take the booking page down; the device's own is a safe fallback.
-    return new Intl.DateTimeFormat("en-CA", opts).format(d);
-  }
-}
-
-/** A timestamp as minutes since midnight in `timeZone`. */
-export function minutesInZone(ms, timeZone) {
-  const d = new Date(num(ms));
-  if (Number.isNaN(d.getTime())) return 0;
-  const opts = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
-  let parts;
-  try {
-    parts = new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: timeZone || undefined }).formatToParts(d);
-  } catch {
-    parts = new Intl.DateTimeFormat("en-GB", opts).formatToParts(d);
-  }
-  const at = (type) => num(parts.find((p) => p.type === type)?.value);
-  return at("hour") * 60 + at("minute");
-}
-
-/** The zone this device is in — what the owner's browser publishes for the salon. */
-export function deviceTimeZone() {
-  try {
-    return new Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-  } catch {
-    return "";
-  }
-}
 
 // ── availability ──────────────────────────────────────────────────────────────────────────────
 

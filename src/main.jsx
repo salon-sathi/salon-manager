@@ -2,6 +2,9 @@ import { StrictMode, Component } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./salon-manager.jsx";
 import { registerServiceWorker } from "./lib/ui/swUpdate.js";
+import { setSalonTimeZone } from "./lib/ui/clock.js";
+import { bookingSettings } from "./lib/booking.js";
+import { readCachedConfig } from "./lib/ui/store.js";
 
 // ----------------------------------------------------------------------------
 // Error boundary — without this, any render-time exception unmounts the whole
@@ -57,6 +60,13 @@ if (!window.storage) {
     },
   };
 }
+
+// Point the app's clock at the SALON's timezone before the first render, from the cached
+// config. Every date the app writes — a bill, an appointment, a log line — is "today" at the
+// salon, and a screen that computes its initial date in a useState initialiser gets that value
+// once and never recomputes it. The cache is what makes it right on the very first paint; the
+// shell re-applies it the moment shop/config arrives, which covers a device's first ever run.
+setSalonTimeZone(bookingSettings(readCachedConfig()).timeZone);
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>

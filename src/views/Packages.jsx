@@ -1,6 +1,7 @@
 // Packages — extracted from salon-manager.jsx.
 
 import { CustomerPicker } from "../components/CustomerPicker.jsx";
+import { nowTime } from "../lib/ui/clock.js";
 import { Card, Empty, Field, Header, Modal } from "../components/primitives.jsx";
 import { formatPhone } from "../lib/customers.js";
 import { activePackages, blankPackage, daysBetweenISO, makePackage, sellPackage, validatePackage } from "../lib/loyalty.js";
@@ -63,11 +64,10 @@ function Packages({ packages, setPackages, customerPackages, setCustomerPackages
     if (!cust) return notify("⚠ Pick a customer first.");
     const pkg = selling;
     const cp = sellPackage(pkg, cust.phone, { id: uid(), today });
-    const now = new Date();
     const bill = {
       id: uid(),
       date: today,
-      time: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      time: nowTime(),
       lines: [{
         name: `${pkg.name} (package · ${pkg.totalUses} sessions)`,
         qty: 1, unit: "package", price: money(pkg.price), buyPrice: 0, amount: money(pkg.price),

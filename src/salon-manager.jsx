@@ -14,6 +14,7 @@ import { reconcileLoyalty, reconcilePackages } from "./lib/loyalty.js";
 import { ROLE_LABELS, can, isBootstrap, resolveRole, sanitizePermissions } from "./lib/roles.js";
 import { activeStaff, serviceToCartLine } from "./lib/salon.js";
 import { toClock } from "./lib/appointments.js";
+import { setSalonTimeZone, nowTime } from "./lib/ui/clock.js";
 import { assignForImport, bookingSettings, buildChairs, buildProfile, buildPublicServices, buildSlotStubs, deviceTimeZone, hoursFromConfig, importedAppointment, slotStubDiff, splitInbox, timeZoneFor } from "./lib/booking.js";
 import { clearInboxEntries, importBooking, stamp, subscribeInbox, subscribePublicSlots, writePublicChairs, writePublicProfile, writePublicServices, writeSlotUpdates } from "./lib/publicSync.js";
 import { SLICES, buildSliceUpdate, isLegacyShape, mapToArray, mergeRemote, overwriteSlice, readUsersOnce, readableSlices, subscribeConfig, subscribeConnection, subscribeOwnUser, subscribeSlice, toMap, writeConfig, writeSlice, writeUser } from "./lib/sync.js";
@@ -274,6 +275,13 @@ function StoreManager({ user, role, onLogout }) {
   // apply the switches in some places and not others, which is exactly how a hidden tab ends
   // up with a reachable view behind it. Sub-components that check for themselves are handed
   // `perms` alongside `role`.
+  // Keep the app's clock pointed at the salon. main.jsx sets it from the cached config before
+  // the first render; this re-applies it as soon as shop/config arrives (a device's first ever
+  // run has no cache) and whenever the owner changes it. useMemo rather than an effect: a date
+  // computed during THIS render — the diary's initial day, a bill being saved — must already
+  // see the right zone, and an effect runs too late for that.
+  useMemo(() => setSalonTimeZone(bookingSettings(config).timeZone), [config]);
+
   const perms = useMemo(() => sanitizePermissions(config.permissions), [config.permissions]);
   const allow = useCallback((action) => can(role, action, perms), [role, perms]);
   // The seeding branch inside the sync subscription needs this too, but re-subscribing every
@@ -563,7 +571,7 @@ function StoreManager({ user, role, onLogout }) {
           id: uid(),
           at: now.getTime(),
           date: todayStr(),
-          time: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+          time: nowTime({ seconds: true }),
           type,
           message,
         },

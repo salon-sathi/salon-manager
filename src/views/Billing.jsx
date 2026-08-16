@@ -1,6 +1,7 @@
 // Billing — extracted from salon-manager.jsx.
 
 import { Empty, Header, Modal } from "../components/primitives.jsx";
+import { nowTime } from "../lib/ui/clock.js";
 import { SendBillActions, UpiQrPreview, printReceipt, receiptExtras } from "../components/receipt.jsx";
 import { findBarcodeClash, findItemByBarcode, itemBarcodes, looksLikeBarcode, parseBarcodeText } from "../lib/barcodes.js";
 import { MQ } from "../lib/breakpoints.js";
@@ -442,12 +443,11 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
       packageDraws.push({ customerPackageId: c.fromPackageId, serviceId: c.id, serviceName: c.name });
     }
 
-    const now = new Date();
     const backDated = saleDate !== todayStr();
     const sale = {
       id: uid(),
       date: saleDate,
-      time: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) + (backDated ? " (back-dated)" : ""),
+      time: nowTime() + (backDated ? " (back-dated)" : ""),
       // Snapshot buyPrice onto each line so historical profit stays anchored to the cost at
       // sale time, even if the item's cost is changed (or the item deleted) later.
       //

@@ -1,6 +1,7 @@
 // Udhari — extracted from salon-manager.jsx.
 
 import { INR, money, todayStr, uid } from "../lib/ui/format.js";
+import { nowTime } from "../lib/ui/clock.js";
 import { Fragment, useMemo, useState } from "react";
 import { S } from "../lib/ui/css.js";
 import { Card, Empty, Field, Header } from "../components/primitives.jsx";
@@ -120,7 +121,7 @@ function Udhari({ sales, setSales, notify, log }) {
   const savePayment = () => {
     if (!paying) return setPaying(null);
     if (payAmtNum <= 0) return notify("Enter an amount greater than ₹0");
-    const nowTime = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    const paidAtTime = nowTime();
     if (paying.type === "bill") {
       if (!payingBill) return setPaying(null);
       const newPaid = money((payingBill.paid || 0) + payAmtNum);
@@ -129,7 +130,7 @@ function Udhari({ sales, setSales, notify, log }) {
       // Also append a dated entry to the payments ledger so the History panel can show when it was paid.
       setSales((all) => all.map((x) => {
         if (x.id !== payingBill.id) return x;
-        const payments = [...(x.payments || []), { id: uid(), date: todayStr(), time: nowTime, amount: payAmtNum, mode: payMode }];
+        const payments = [...(x.payments || []), { id: uid(), date: todayStr(), time: paidAtTime, amount: payAmtNum, mode: payMode }];
         return { ...x, paid: newPaid, paidMode: payMode, payments };
       }));
       log("sale", `Udhari repayment ${INR(payAmtNum)} (${payMode}) from ${payWho}${rem > 0 ? ` — ${INR(rem)} still due` : " — bill cleared"}`);
@@ -144,7 +145,7 @@ function Udhari({ sales, setSales, notify, log }) {
       setSales((all) => all.map((x) => {
         const amt = byId[x.id];
         if (amt == null) return x;
-        const payments = [...(x.payments || []), { id: uid(), date: todayStr(), time: nowTime, amount: amt, mode: payMode }];
+        const payments = [...(x.payments || []), { id: uid(), date: todayStr(), time: paidAtTime, amount: amt, mode: payMode }];
         return { ...x, paid: money((x.paid || 0) + amt), paidMode: payMode, payments };
       }));
       const rem = money(payOut - payAmtNum);

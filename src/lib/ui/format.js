@@ -1,5 +1,6 @@
 // Money, dates and ids — the smallest shared helpers in the app.
 
+import { todayStr } from "./clock.js";
 
 // ---------- helpers ----------
 const INR = (n) =>
@@ -10,11 +11,16 @@ const money = (n) => {
   const v = Number(n);
   return Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : 0;
 };
-// Local calendar date as YYYY-MM-DD. MUST be local, not toISOString() (which is UTC)
+// A Date's OWN calendar fields as YYYY-MM-DD. MUST be local, not toISOString() (which is UTC)
 // — otherwise early-morning sales in IST get filed under the previous day.
+//
+// This is a formatter for a Date somebody constructed — `new Date(y, m, 1)`, or a parsed
+// `"2026-08-16T00:00"` — and it stays that. It is NOT "today": that moved to clock.js and now
+// follows the SALON's timezone rather than the device's. Re-reading a constructed date in
+// another zone would shift every chart bucket and date range by a day, so the two are
+// deliberately different functions with different jobs.
 const dateStr = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const todayStr = () => dateStr(new Date());
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 // A short, human-readable bill reference derived from the (already-unique) sale id: last 6 chars,
 // upper-cased. Printed on the receipt AND stamped into the UPI note so a received payment can be

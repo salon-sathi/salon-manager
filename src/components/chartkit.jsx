@@ -3,6 +3,7 @@
 import { DOW, DOW_ORDER, formatINR, hourLabel, inrCompact } from "../lib/stats.js";
 import { S } from "../lib/ui/css.js";
 import { INR, dateStr, money } from "../lib/ui/format.js";
+import { salonTodayDate, todayStr } from "../lib/ui/clock.js";
 import { Empty } from "./primitives.jsx";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -17,30 +18,33 @@ const barLabel = { position: "top", formatter: (v) => (v ? inrTick(v) : ""), fon
 // `earliest` (a YYYY-MM-DD) is only consulted for the "allTime" preset — the caller
 // passes the oldest record date so "All time" spans exactly the real data.
 function periodRange(preset, cfrom, cto, earliest) {
-  const now = new Date();
+  // The SALON's today, as a Date carrying that date in its local fields — so every
+  // new Date(y, m - N, …) and dateStr() below is anchored to the salon rather than to whatever
+  // zone this device happens to be set to. See lib/ui/clock.js.
+  const now = salonTodayDate();
   const y = now.getFullYear(), m = now.getMonth();
   const som = (yy, mm) => dateStr(new Date(yy, mm, 1));
   const eom = (yy, mm) => dateStr(new Date(yy, mm + 1, 0));
   switch (preset) {
     case "lastMonth": { const d = new Date(y, m - 1, 1); return { from: som(d.getFullYear(), d.getMonth()), to: eom(d.getFullYear(), d.getMonth()), label: d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) }; }
-    case "thisYear": return { from: dateStr(new Date(y, 0, 1)), to: dateStr(now), label: "Year " + y };
-    case "last7": { const d = new Date(); d.setDate(d.getDate() - 6); return { from: dateStr(d), to: dateStr(now), label: "Last 7 days" }; }
-    case "last14": { const d = new Date(); d.setDate(d.getDate() - 13); return { from: dateStr(d), to: dateStr(now), label: "Last 14 days" }; }
-    case "last30": { const d = new Date(); d.setDate(d.getDate() - 29); return { from: dateStr(d), to: dateStr(now), label: "Last 30 days" }; }
-    case "last45": { const d = new Date(); d.setDate(d.getDate() - 44); return { from: dateStr(d), to: dateStr(now), label: "Last 45 days" }; }
+    case "thisYear": return { from: dateStr(new Date(y, 0, 1)), to: todayStr(), label: "Year " + y };
+    case "last7": { const d = salonTodayDate(); d.setDate(d.getDate() - 6); return { from: dateStr(d), to: todayStr(), label: "Last 7 days" }; }
+    case "last14": { const d = salonTodayDate(); d.setDate(d.getDate() - 13); return { from: dateStr(d), to: todayStr(), label: "Last 14 days" }; }
+    case "last30": { const d = salonTodayDate(); d.setDate(d.getDate() - 29); return { from: dateStr(d), to: todayStr(), label: "Last 30 days" }; }
+    case "last45": { const d = salonTodayDate(); d.setDate(d.getDate() - 44); return { from: dateStr(d), to: todayStr(), label: "Last 45 days" }; }
     // Month-based windows: new Date(y, m-N, day) rolls the year correctly and clamps overflow days.
-    case "last2m": { const d = new Date(y, m - 2, now.getDate()); return { from: dateStr(d), to: dateStr(now), label: "Last 2 months" }; }
-    case "lastQuarter": { const d = new Date(y, m - 3, now.getDate()); return { from: dateStr(d), to: dateStr(now), label: "Last 3 months" }; }
-    case "last6m": { const d = new Date(y, m - 6, now.getDate()); return { from: dateStr(d), to: dateStr(now), label: "Last 6 months" }; }
+    case "last2m": { const d = new Date(y, m - 2, now.getDate()); return { from: dateStr(d), to: todayStr(), label: "Last 2 months" }; }
+    case "lastQuarter": { const d = new Date(y, m - 3, now.getDate()); return { from: dateStr(d), to: todayStr(), label: "Last 3 months" }; }
+    case "last6m": { const d = new Date(y, m - 6, now.getDate()); return { from: dateStr(d), to: todayStr(), label: "Last 6 months" }; }
     // All data on record: from the oldest entry — i.e. when the shop's books begin —
     // up to today. The label surfaces that start date so it's clear where "all time" begins.
     case "allTime": {
       const start = earliest || dateStr(new Date(y - 5, 0, 1));
       const since = earliest ? new Date(earliest + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null;
-      return { from: start, to: dateStr(now), label: since ? `All time · since ${since}` : "All time" };
+      return { from: start, to: todayStr(), label: since ? `All time · since ${since}` : "All time" };
     }
-    case "custom": return { from: cfrom || dateStr(now), to: cto || dateStr(now), label: `${cfrom || "…"} → ${cto || "…"}` };
-    default: return { from: som(y, m), to: dateStr(now), label: now.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) };
+    case "custom": return { from: cfrom || todayStr(), to: cto || todayStr(), label: `${cfrom || "…"} → ${cto || "…"}` };
+    default: return { from: som(y, m), to: todayStr(), label: now.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) };
   }
 }
 

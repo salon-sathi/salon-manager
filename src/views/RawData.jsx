@@ -1,6 +1,7 @@
 // RawData — extracted from salon-manager.jsx.
 
 import { Empty, Header } from "../components/primitives.jsx";
+import { nowTime } from "../lib/ui/clock.js";
 import { parseFile, parseRawText } from "../lib/parse.js";
 import { S } from "../lib/ui/css.js";
 import { INR, money, todayStr, uid } from "../lib/ui/format.js";
@@ -160,10 +161,9 @@ function RawData({ items, setItems, setSales, setExpenses, notify, log }) {
       return { name: a.name, qty: a.qty, unit: ex?.unit || "pc", buyPrice: ex?.buyPrice ?? 0, price: a.qty ? money(a.amount / a.qty) : a.amount, amount: money(a.amount) };
     });
     total = money(total); profit = money(profit);
-    const now = new Date();
     setSales((s) => [...s, {
       id: uid(), date: saleDate || todayStr(),
-      time: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) + " (imported)",
+      time: nowTime() + " (imported)",
       lines, total, profit,
     }]);
     setItems((its) => its.map((i) => {
