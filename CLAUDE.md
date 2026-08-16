@@ -193,6 +193,20 @@ is only the UI mirror of it. The rules are exercised by:
 - [`tests/rules/publicBooking.test.js`](tests/rules/publicBooking.test.js) — the one
   unauthenticated write in the file, and everything it must still not reach.
 
+There is also [`src/lib/rulesShape.test.js`](src/lib/rulesShape.test.js), which runs under plain
+`npm test` — **no emulator, no Java, and therefore on the deploy path**. It parses
+`database.rules.json` as data and pins the properties whose failure would be a breach rather than
+a bug: exactly one world-readable subtree, exactly two street-writable paths (both create-only and
+both kill-switched), `$other` locked on everything the public can write, the money nodes still
+owner-only, and `shop/appointments` byte-identical to what it has always been. It splits each
+rule on its **top-level** `||` to do it — `shop/sales/$id` has an inner `||` entirely inside an
+`auth != null` guard, and a checker that grepped the raw string could not tell that apart from a
+genuinely public branch.
+
+It cannot tell you a rule EVALUATES correctly; only the emulator suite can. It exists because
+that suite needs a JVM and so never runs in CI, which left the access boundary with nothing at
+all guarding it on the way to production. Where the two disagree, `tests/rules/**` is right.
+
 Config lives in [`vitest.rules.config.js`](vitest.rules.config.js), not `vite.config.js`.
 
 **Java 21+ must be on `PATH`** — the RTDB emulator is a JAR. Without it the command stops at
