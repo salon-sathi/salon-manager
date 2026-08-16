@@ -274,3 +274,59 @@ test.describe("the salon's side", () => {
     expect(asText).not.toContain(SERVICES.haircut.id);
   });
 });
+
+test.describe("the customer record an online booking leaves behind", () => {
+  test("the customer who booked online is filed on the customer list", async ({ browser, page }) => {
+    // The booking page cannot write shop/customers itself — deliberately, since that node's
+    // rules would let an unauthenticated write RENAME an existing customer. So the salon's own
+    // device files them as it drains the inbox, and this is the spec that proves the two halves
+    // meet: an anonymous stranger's booking ends up as a real customer record, with nobody at
+    // the salon typing anything.
+    await clearPath("shop/customers");
+    await signIn(page, "owner");
+    await navItem(page, "Appointments").click();
+    await expect(page.getByRole("heading", { name: "Appointments" })).toBeVisible();
+
+    const { context, page: cust } = await customer(browser);
+    await book(cust, { name: "E2E Anjali", phone: "9876500066" });
+    await expect(cust.getByRole("heading", { name: /You're booked/i })).toBeVisible();
+
+    // Keyed by phone, id equal to it, and a non-empty name — which is what
+    // shop/customers/$id's .validate demands. A record built any other way is refused here.
+    await expect
+      .poll(async () => await readAsAdmin("shop/customers/9876500066"), { timeout: 15_000 })
+      .toMatchObject({ id: "9876500066", phone: "9876500066", name: "E2E Anjali" });
+
+    // And the desk sees them on the customer list, not just in the diary.
+    await navItem(page, "Customers").click();
+    await expect(page.getByText("E2E Anjali").first()).toBeVisible({ timeout: 15_000 });
+
+    await context.close();
+  });
+
+  test("does not rename a customer the salon already has", async ({ browser, page }) => {
+    // Somebody booking online under a nickname must not overwrite the profile the salon
+    // curated. The appointment still carries what they typed; the record does not change.
+    await clearPath("shop/customers");
+    await seed("shop/customers", {
+      9876500066: { id: "9876500066", phone: "9876500066", name: "Anjali Deshpande", createdAt: "2020-01-01", totalVisits: 0, totalSpend: 0, lastVisitAt: "", loyaltyPoints: 0, tier: "" },
+    });
+    await signIn(page, "owner");
+    await navItem(page, "Appointments").click();
+    await expect(page.getByRole("heading", { name: "Appointments" })).toBeVisible();
+
+    const { context, page: cust } = await customer(browser);
+    await book(cust, { name: "anju", phone: "9876500066" });
+    await expect(cust.getByRole("heading", { name: /You're booked/i })).toBeVisible();
+
+    // Wait for the import, so this is asserting "did not rename" and not "has not run yet".
+    await expect
+      .poll(async () => Object.values((await readAsAdmin("shop/appointments")) || {}).length, { timeout: 15_000 })
+      .toBe(1);
+    expect((await readAsAdmin("shop/customers/9876500066")).name).toBe("Anjali Deshpande");
+    // The name they gave still rides on the booking, where the desk can see it.
+    expect(Object.values(await readAsAdmin("shop/appointments"))[0].customerName).toBe("anju");
+
+    await context.close();
+  });
+});

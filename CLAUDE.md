@@ -473,6 +473,59 @@ Firebase's random download token, on a path keyed by **sale id, never the phone 
 Nothing writes the uploaded URL back onto the sale; re-sending re-uploads to the same
 deterministic path, for the same reason nothing in this app keeps a running total.
 
+## Capturing the customer
+
+A name and a number given anywhere in the app end up on the customer list. There is one
+function that does it — `captureCustomer()` in [`src/lib/customers.js`](src/lib/customers.js) —
+and three call sites:
+
+| Where | When |
+|---|---|
+| [`views/Billing.jsx`](src/views/Billing.jsx) `completeSale` | the free-text name + mobile under the cart, as the bill saves |
+| [`salon-manager.jsx`](src/salon-manager.jsx) (inbox drain) | an online booking, as it is materialised into the diary |
+| [`views/Appointments.jsx`](src/views/Appointments.jsx) `save` | any booking that names a customer — the fallback for a device that drained nothing |
+
+The picker's quick-create (`CustomerPicker`, also mounted in Packages) is unchanged and still
+goes through `makeCustomer`/`validateCustomer`.
+
+**Both a name and a valid phone are required, and that is the database's rule rather than a
+preference.** A customer is keyed by phone (`shop/customers/<phone>`, `id === phone`), and
+`customers/$id` validates `hasChildren(['id','name'])` with a non-empty `name`. Capturing a
+nameless or numberless walk-in would build a record the rules reject — a write that passes every
+jsdom test in the repo and fails at the counter. So a walk-in who gives neither stays free text
+on the bill, which is still a perfectly valid bill.
+
+**An existing customer is never renamed.** The profile is the salon's curated copy; a name typed
+in a hurry at a busy till, or a nickname typed into the public booking form, must not clobber it.
+A *blank* name is filled in — that is new information, not a competing version of it.
+`captureCustomer` returns the same array reference when nothing changed, so a regular's bill
+costs no sync write.
+
+**A captured bill is LINKED, not just labelled.** `completeSale` writes `customerPhone` (and the
+normalised `mobile`) onto the sale whenever the typed number is usable. Without that link the new
+customer would sit on the list showing 0 visits and ₹0 spend, because both are derived from the
+bill's `customerPhone` — the record would exist and look broken. For the same reason `willEarn`
+keys on the bill's customer rather than on `picked`: a bill that counts towards someone's visits
+but silently earns no points is a ledger disagreeing with itself.
+
+**Redeeming points and drawing down a package still require a deliberate pick.** Those read
+`picked` (the picker's own value), not the typed number: spending a customer's points because a
+number was typed into a text box is not a decision the till should make for the salon.
+
+**Capture never seeds a derived field.** `totalVisits`, `totalSpend`, `lastVisitAt`,
+`loyaltyPoints` and `tier` stay the output of `reconcileCustomers` + `reconcileLoyalty`, which the
+shell runs on the next pass and which now have a record to find. This is the app's central
+invariant — nothing that matters is a running total — and capture must not become an exception.
+
+**The online-booking panel in the diary still says "ring to confirm".** *Filed* and *verified* are
+different things: nobody at the salon has spoken to that person, and auto-filing them must not
+delete the warning. The panel shows for every `source === "online"` booking; only its "Add to
+customer list" button is conditional, as the fallback for a booking the importer could not file.
+
+Covered by `customers.test.js` (the rules), `customer-capture.integration.test.jsx` (the wiring,
+against the real mounted app), and `billing.spec.js` / `booking.spec.js` (the real rules boundary
+— the only place a malformed record is actually refused).
+
 ## The public booking link
 
 A link the salon can put in an Instagram bio or on a QR at the counter, so a customer can book

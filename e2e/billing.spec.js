@@ -316,3 +316,73 @@ test("Share bill rasterizes the receipt to a real JPEG", async ({ page }) => {
   // check that catches the <foreignObject> parse failures the rasterizer exists to avoid.
   expect(shared.size).toBeGreaterThan(5000);
 });
+
+// ---- capturing the customer ----------------------------------------------------------
+//
+// The till's second customer field. The picker is the deliberate way to put a bill on a
+// customer; a name and a number straight into the two boxes under the cart is what the front
+// desk actually types when there is somebody waiting. Both must end up filing a customer.
+//
+// Only the emulator can prove this one: shop/customers/$id validates
+// `hasChildren(['id','name'])` with a non-empty name, so a record built wrong is accepted by
+// every jsdom test in the repo and rejected at the counter.
+
+test.describe("a name typed on a bill becomes a customer", () => {
+  const PHONE = "9876500077";
+
+  test.beforeEach(async () => {
+    // customers is rewritten by the app (reconcileLoyalty/reconcileCustomers recompute it from
+    // the bills on every sync), so a known starting point has to be re-established per test.
+    await clearPath("shop/customers");
+  });
+
+  const storedCustomer = async () => await readAsAdmin(`shop/customers/${PHONE}`);
+
+  test("files them under their phone, and links the bill to the record", async ({ page }) => {
+    await openTill(page);
+    await addService(page, SERVICES.haircut); // ₹500
+    // Typed with a space, exactly as a human writes a number down. The key must be normalised.
+    await page.getByLabel("Customer name").fill("E2E Kavita");
+    await page.getByLabel("Customer mobile").fill("98765 00077");
+
+    await page.getByRole("button", { name: /Complete sale/ }).click();
+
+    // The record the rules accepted: keyed by the bare 10 digits, id equal to it, name present.
+    await expect.poll(storedCustomer, POLL).toMatchObject({ id: PHONE, phone: PHONE, name: "E2E Kavita" });
+    // Linked, so the visit is theirs. Unlinked, they would sit on the list at 0 visits / ₹0.
+    await expect.poll(firstSale, POLL).toMatchObject({ customerPhone: PHONE, customer: "E2E Kavita", total: 500 });
+    // And the stats the shell derives from that bill come back onto the record.
+    await expect.poll(async () => (await storedCustomer())?.totalVisits, POLL).toBe(1);
+    await expect.poll(async () => (await storedCustomer())?.totalSpend, POLL).toBe(500);
+  });
+
+  test("shows up on the Customers screen without anybody adding them", async ({ page }) => {
+    await openTill(page);
+    await addService(page, SERVICES.haircut);
+    await page.getByLabel("Customer name").fill("E2E Kavita");
+    await page.getByLabel("Customer mobile").fill(PHONE);
+    await page.getByRole("button", { name: /Complete sale/ }).click();
+    await expect.poll(storedCustomer, POLL).toBeTruthy();
+
+    await navItem(page, "Customers").click();
+
+    // .first(): the name renders in the table row and again in the profile drawer's heading
+    // once opened — strict mode would fail on the ambiguity rather than on the behaviour.
+    await expect(page.getByText("E2E Kavita").first()).toBeVisible();
+    await expect(page.getByText("98765 00077").first()).toBeVisible();
+  });
+
+  test("leaves a walk-in who gave no number alone", async ({ page }) => {
+    // Phone is the key, so there is nothing to file this under. The bill still carries the
+    // name as free text — Udhari groups debts by it — and the customer list stays clean.
+    await openTill(page);
+    await addService(page, SERVICES.haircut);
+    await page.getByLabel("Customer name").fill("E2E Nobody");
+
+    await page.getByRole("button", { name: /Complete sale/ }).click();
+
+    await expect.poll(firstSale, POLL).toMatchObject({ customer: "E2E Nobody" });
+    expect((await firstSale()).customerPhone).toBeUndefined();
+    expect(await readAsAdmin("shop/customers")).toBeNull();
+  });
+});
