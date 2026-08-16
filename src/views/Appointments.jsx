@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { S } from "../lib/ui/css.js";
 import { ServiceIcon } from "../components/ServiceIcon.jsx";
 import { CustomerPicker, makeCustomer, validateCustomer } from "../components/CustomerPicker.jsx";
-import { blankCustomer, formatPhone } from "../lib/customers.js";
+import { blankCustomer, captureCustomer, formatPhone } from "../lib/customers.js";
 
 // ---------- Appointments ----------
 // A hand-rolled CSS-grid day view: one column per working stylist, 15-minute rows down the
@@ -74,7 +74,12 @@ function Appointments({
     setErr("");
     setEditing({ ...blankAppointment(date, staffId, startMin, todayStr()), id: "" });
   };
-  const openEdit = (a) => { setErr(""); setEditing({ ...a }); };
+  // `serviceIds: []` is normalised back in, because RTDB does not store an empty array — it
+  // drops the key entirely, so a record saved with no services comes back with the field
+  // ABSENT rather than empty. Blocked-out time has always been written that way, and an online
+  // booking always is (the customer is never asked which services they want), so without this
+  // the modal reads `.includes` off undefined and takes the whole diary down with it.
+  const openEdit = (a) => { setErr(""); setEditing({ ...a, serviceIds: a.serviceIds || [] }); };
   const close = () => { setEditing(null); setErr(""); };
 
   const save = () => {
@@ -89,6 +94,12 @@ function Appointments({
     const isNew = !form.id;
     const rec = { ...form, id: isNew ? uid() : form.id };
     setAppointments((list) => (isNew ? [...list, rec] : list.map((a) => (a.id === rec.id ? rec : a))));
+    // Any booking that names a customer files one. A desk booking goes through the picker and is
+    // on the list already, so in practice this catches the online booking the shell's importer
+    // could not file — a device without appointments.edit drains nothing, and a booking taken
+    // before this existed carries its details on the appointment alone. No-op when they are
+    // already known, and it never renames them.
+    setCustomers((list) => captureCustomer(list, { name: rec.customerName, phone: rec.customerPhone, createdAt: todayStr() }).customers);
     const who = rec.customerPhone ? byId.get(rec.customerPhone)?.name || rec.customerPhone : "blocked time";
     log("sale", `${isNew ? "Booked" : "Updated"} ${rec.status === "blocked" ? "blocked time" : "appointment"} — ${who} · ${date} ${toClock(rec.startMin)} · ${staffName(staff, rec.staffId)}`);
     notify(isNew ? "✓ Booked" : "✓ Appointment updated");
@@ -312,10 +323,12 @@ function AppointmentModal({
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
   const toggleService = (id) =>
-    setDraft((d) => ({
-      ...d,
-      serviceIds: d.serviceIds.includes(id) ? d.serviceIds.filter((x) => x !== id) : [...d.serviceIds, id],
-    }));
+    setDraft((d) => {
+      // Never assume the field is there: RTDB drops an empty array, so a record with no
+      // services comes back without the key at all. See openEdit.
+      const chosen = d.serviceIds || [];
+      return { ...d, serviceIds: chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id] };
+    });
 
   // File an online booking's customer onto the real customer list, with the name and number
   // they gave. Goes through the same validate/make pair the picker's quick-create uses, so a
@@ -377,18 +390,26 @@ function AppointmentModal({
       {!isBlock && (
         <>
           {/* A booking that came in on the public link. The customer gave their name and number
-              but has no shop/customers record — the booking page cannot write one, deliberately,
-              because that node's rules would let an unauthenticated write RENAME an existing
-              customer. So the details ride on the appointment until somebody here files them,
-              and until then the picker below has nothing to show. */}
-          {draft.source === "online" && !customers.some((c) => c.phone === draft.customerPhone) && (
+              but the booking page cannot write shop/customers itself — deliberately, because that
+              node's rules would let an unauthenticated write RENAME an existing customer. The shell
+              files them the moment it drains the inbox, so by the time anybody opens this they are
+              normally already on the list and the picker below has found them.
+
+              The panel shows either way, and that is the point: "filed" and "verified" are
+              different things. Nobody at the salon has spoken to this person, and the warning to
+              ring them must not disappear just because the record now exists. The button remains
+              for the case the auto-file could not run — a device without appointments.edit drained
+              nothing, or the booking predates this working. */}
+          {draft.source === "online" && (
             <div style={{ background: "var(--surface-2, #F4FAF6)", border: "1px solid var(--tint-info-border, #CFE3D7)", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontSize: 12.5 }}>
               <div style={{ fontWeight: 700, marginBottom: 2 }}>🌐 Booked online</div>
               <div style={{ color: "var(--text-mid, #6B7E74)", marginBottom: 6 }}>
                 {draft.customerName || "No name given"} · {formatPhone(draft.customerPhone) || "no number"}
-                {" — not on the customer list yet. The number hasn't been verified; ring to confirm."}
+                {customers.some((c) => c.phone === draft.customerPhone)
+                  ? " — on the customer list. The number hasn't been verified; ring to confirm."
+                  : " — not on the customer list yet. The number hasn't been verified; ring to confirm."}
               </div>
-              {draft.customerName && draft.customerPhone && (
+              {draft.customerName && draft.customerPhone && !customers.some((c) => c.phone === draft.customerPhone) && (
                 <button className="btn small" onClick={saveOnlineCustomer}>Add to customer list</button>
               )}
             </div>
@@ -407,7 +428,7 @@ function AppointmentModal({
                 <div style={{ fontSize: 12.5, color: "var(--text-mid, #8A9C90)", padding: 4 }}>No services on the menu yet.</div>
               ) : live.map((s) => (
                 <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: 13, cursor: "pointer" }}>
-                  <input type="checkbox" checked={draft.serviceIds.includes(s.id)} onChange={() => toggleService(s.id)} />
+                  <input type="checkbox" checked={(draft.serviceIds || []).includes(s.id)} onChange={() => toggleService(s.id)} />
                   <span style={{ flex: 1 }}>{s.name}</span>
                   <span style={{ color: "var(--text-mid, #8A9C90)", fontSize: 12 }}>{s.durationMin}m</span>
                   <span style={{ fontWeight: 600, fontSize: 12 }}>{INR(s.price)}</span>

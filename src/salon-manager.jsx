@@ -8,7 +8,7 @@
 import { SERVICE_ICON_CSS, ServiceIconDefs } from "./components/ServiceIcon.jsx";
 import { ConnBadge, Field, NavButton, NoAccess, OfflineBlockModal, Splash, UpdateBadge } from "./components/primitives.jsx";
 import { MQ } from "./lib/breakpoints.js";
-import { reconcileCustomers } from "./lib/customers.js";
+import { captureCustomer, reconcileCustomers } from "./lib/customers.js";
 import { auth, isFirebaseConfigured } from "./lib/firebase.js";
 import { reconcileLoyalty, reconcilePackages } from "./lib/loyalty.js";
 import { ROLE_LABELS, can, isBootstrap, resolveRole, sanitizePermissions } from "./lib/roles.js";
@@ -731,6 +731,20 @@ function StoreManager({ user, role, onLogout }) {
         try {
           await importBooking(rec);
           placed.push(rec);
+          // File the customer at the same moment the booking reaches the diary. The booking page
+          // cannot write shop/customers itself — deliberately, since that node's rules would let
+          // an unauthenticated write rename an existing customer — so this is the first point at
+          // which a signed-in device can do it, and it costs the desk nothing.
+          //
+          // Always well-formed: publicBookings validates customerName (non-empty) and
+          // customerPhone (/^[6-9]\d{9}$/), which is exactly what captureCustomer requires. It is
+          // a no-op for a returning customer and never renames one, so an existing profile is
+          // safe from a name typed into the public form.
+          //
+          // Deliberately NOT writers.customers: that setter raises the offline hard-stop modal,
+          // and this is a background drain the desk did not initiate. The import write above has
+          // already proven the connection.
+          setCustomers((list) => captureCustomer(list, { name: rec.customerName, phone: rec.customerPhone, createdAt: rec.createdAt }).customers);
           addLogRef.current?.("appointments", `Online booking — ${rec.customerName} on ${rec.date} at ${toClock(rec.startMin)}`);
         } catch (e) {
           console.error("booking import failed", entry.id, e);

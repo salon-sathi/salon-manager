@@ -7,6 +7,7 @@ import { MQ } from "../lib/breakpoints.js";
 import { featureOn } from "../lib/features.js";
 import { loyaltyRules, maxRedeemablePoints, packageCovering, pointsBalance, pointsForSpend, redeemValueOf } from "../lib/loyalty.js";
 import { activeServices, activeStaff, isServiceLine, serviceToCartLine } from "../lib/salon.js";
+import { captureCustomer, isValidPhone, normalizePhone } from "../lib/customers.js";
 import { CATEGORY_FALLBACK, resolveIcon } from "../lib/serviceIcons.js";
 import { S } from "../lib/ui/css.js";
 import { INR, money, todayStr, uid } from "../lib/ui/format.js";
@@ -129,6 +130,20 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
     () => (customerPhone ? customers.find((c) => c.phone === customerPhone) || null : null),
     [customerPhone, customers]
   );
+
+  // The number typed into the free-text fields, when it is enough to file a customer on.
+  //
+  // The picker is the deliberate way to put a bill on a customer; this is the way it actually
+  // happens when the counter is busy — a name and a number straight into the two boxes below the
+  // cart. Historically that went onto the bill as loose text and nowhere else, so the customer
+  // list stayed empty while the sales history filled up with names. Requiring BOTH halves is what
+  // captureCustomer requires and why: phone is the key, and the rules refuse a nameless record.
+  const typedPhone = useMemo(
+    () => (!picked && customer.trim() && isValidPhone(mobile) ? normalizePhone(mobile) : ""),
+    [picked, customer, mobile]
+  );
+  // Who this bill will be attributed to, however they were identified. "" is a true walk-in.
+  const billPhone = picked?.phone || typedPhone;
 
   const bookableStaff = useMemo(() => activeStaff(staff), [staff]);
 
@@ -367,7 +382,11 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
   // Points come off AFTER the manual discount, against what's actually left owing. Applying
   // them to the pre-discount subtotal would let a discounted bill be over-paid with points.
   const rules = useMemo(() => loyaltyRules(config), [config]);
-  const ptsBalance = useMemo(() => (picked ? pointsBalance(picked.phone, sales) : 0), [picked, sales]);
+  // Read off billPhone so the balance shown is the customer's real one even when the desk typed
+  // their number instead of picking them. REDEEMING still needs a deliberate pick (maxPts below
+  // stays on `picked`, as do package draws): spending someone's points because a number was
+  // typed into a text box is not a decision the till should make on the salon's behalf.
+  const ptsBalance = useMemo(() => (billPhone ? pointsBalance(billPhone, sales) : 0), [billPhone, sales]);
   const maxPts = useMemo(
     () => (picked ? maxRedeemablePoints(ptsBalance, afterDiscount, rules) : 0),
     [picked, ptsBalance, afterDiscount, rules]
@@ -382,7 +401,12 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
   const profit = money(grossProfit - discountAmt - redeemAmt);
   // What this bill will earn. Earned on what the customer actually PAYS: earning points on the
   // part settled with points would be paying interest on its own currency.
-  const willEarn = useMemo(() => (picked ? pointsForSpend(total, rules) : 0), [picked, total, rules]);
+  //
+  // Keyed on billPhone, not on `picked`: a customer captured from the typed name/mobile is on the
+  // list by the time this bill is saved, and their first visit has to earn like anybody else's.
+  // Gating this on `picked` would have made the ledger disagree with itself — the bill counts
+  // towards their visits and spend (both derived from customerPhone) but silently earns nothing.
+  const willEarn = useMemo(() => (billPhone ? pointsForSpend(total, rules) : 0), [billPhone, total, rules]);
 
   const completeSale = () => {
     if (cart.length === 0) return;
@@ -445,9 +469,16 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
       payment: pay,
       // The durable link to the customer record. Legacy `customer`/`mobile` free text is still
       // written alongside it: Udhari groups bills by name, and old bills only have that.
+      //
+      // A typed name+number is linked exactly like a picked one, because it is about to become a
+      // customer record (below) and a bill that didn't point at it would leave that customer
+      // showing 0 visits and ₹0 spend — both are derived from customerPhone. The phone is stored
+      // NORMALISED here for the same reason the picked branch stores picked.phone: it is a key,
+      // and "98765 43210" would not match the record it names.
       ...(picked ? { customerPhone: picked.phone, customer: picked.name, mobile: picked.phone } : {}),
-      ...(!picked && customer.trim() ? { customer: customer.trim() } : {}),
-      ...(!picked && mobile.trim() ? { mobile: mobile.trim() } : {}),
+      ...(typedPhone ? { customerPhone: typedPhone, customer: customer.trim(), mobile: typedPhone } : {}),
+      ...(!picked && !typedPhone && customer.trim() ? { customer: customer.trim() } : {}),
+      ...(!picked && !typedPhone && mobile.trim() ? { mobile: mobile.trim() } : {}),
       // Links the bill back to the appointment it closed, so the diary can show "✓ Billed"
       // and a second Complete → Bill can't charge the customer twice.
       ...(fromAppointment ? { appointmentId: fromAppointment } : {}),
@@ -467,6 +498,18 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
       ...(pay === "Udhari" && +paidNow > 0 ? { paidMode } : {}),
     };
     setSales((s) => [...s, sale]);
+    // File the customer the moment the bill is saved. This is the counter's real capture path:
+    // the picker's quick-create needs somebody to notice the "+ Add" row, while a name and a
+    // number in the two boxes is what a busy front desk actually types.
+    //
+    // Functional update, and captureCustomer is given the CURRENT list rather than the `customers`
+    // prop closed over by this handler: a sync snapshot can land between render and save, and
+    // rebuilding the array from a stale copy would drop whatever arrived in between. It is a
+    // no-op (same array reference) when the customer is already on the list, so a regular's bill
+    // costs nothing and never re-writes their profile.
+    if (typedPhone) {
+      setCustomers((list) => captureCustomer(list, { name: customer, phone: mobile, createdAt: saleDate }).customers);
+    }
     // Deplete stock for PRODUCT lines only. A service id can't collide with an item id, but
     // filtering by line type says the intent out loud rather than relying on that.
     setItems((its) => its.map((i) => {
@@ -751,7 +794,7 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
                 <span>TOTAL</span>
                 <span>{INR(total)}</span>
               </div>
-              {picked && willEarn > 0 && (
+              {billPhone && willEarn > 0 && (
                 <div style={{ fontSize: 11.5, color: "var(--brand)", textAlign: "right", marginTop: 2 }}>
                   Earns {willEarn} point{willEarn > 1 ? "s" : ""} · balance {ptsBalance - redeemedPts + willEarn}
                 </div>
@@ -799,6 +842,16 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
                     )}
                   </div>
                   <input className="input" type="tel" inputMode="numeric" maxLength={15} placeholder="Mobile (optional)" value={mobile} onChange={(e) => setMobile(e.target.value)} aria-label="Customer mobile" />
+                </div>
+              )}
+              {/* Say what saving this bill is about to do. The capture is a side effect of
+                  completing the sale, and a side effect nobody was told about is indistinguishable
+                  from a bug the first time somebody notices the customer list growing. It also
+                  teaches the front desk the rule — a name AND a full number — at the moment they
+                  are one digit short of it. */}
+              {!picked && typedPhone && (
+                <div style={{ fontSize: 11.5, color: "var(--brand)", marginTop: 4 }}>
+                  ✓ {customer.trim()} will be added to your customer list.
                 </div>
               )}
               {pay === "Udhari" && (

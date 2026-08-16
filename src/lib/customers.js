@@ -68,6 +68,49 @@ export const blankCustomer = (phone = "", createdAt = "") => ({
   tier: "",
 });
 
+/**
+ * Fold a name and number captured somewhere OTHER than the customer screen — typed onto a bill
+ * at the till, or given by a customer on the public booking link — into the customer list.
+ *
+ * Returns `{ customers, record, created }`. `customers` is the same array reference when nothing
+ * changed, so it drops straight into a setState without provoking a pointless sync write (same
+ * contract as reconcileCustomers above).
+ *
+ * ── Why BOTH a name and a valid number are required ─────────────────────────────────────────
+ * This is the database's rule, not a preference. A customer is KEYED by phone
+ * (shop/customers/<phone>), so a record without one cannot be found again by anything; and
+ * `customers/$id` in database.rules.json validates `hasChildren(['id','name'])` with
+ * `name.length > 0`. Capturing a nameless or numberless walk-in would therefore build a record
+ * the rules reject — a write that fails at the counter, which is exactly the failure this
+ * function exists to avoid. A walk-in who gives neither stays free text on the bill, and that is
+ * still a perfectly valid bill.
+ *
+ * ── Why an existing name is never overwritten ───────────────────────────────────────────────
+ * The customer record is the salon's curated copy: it may have been corrected, given a fuller
+ * spelling, or annotated. A name typed in a hurry at a busy till must not clobber it — the bill
+ * is a worse source than the profile. A BLANK name is filled in, because that is strictly new
+ * information rather than a competing version of it.
+ *
+ * Nothing here touches totalVisits / totalSpend / loyaltyPoints / tier. Those are derived from
+ * the bills by reconcileCustomers + reconcileLoyalty, which the shell runs on the very next
+ * pass — so a customer captured mid-bill arrives on the list already carrying that visit.
+ */
+export function captureCustomer(customers, { name, phone, createdAt = "" } = {}) {
+  const list = customers || [];
+  const key = normalizePhone(phone);
+  const clean = String(name || "").trim();
+  if (!isValidPhone(key) || !clean) return { customers: list, record: null, created: false };
+
+  const found = list.find((c) => normalizePhone(c.phone) === key);
+  if (!found) {
+    const record = { ...blankCustomer(key, createdAt), name: clean };
+    return { customers: [...list, record], record, created: true };
+  }
+  if (String(found.name || "").trim()) return { customers: list, record: found, created: false };
+  const record = { ...found, name: clean };
+  return { customers: list.map((c) => (c === found ? record : c)), record, created: false };
+}
+
 /** Every bill belonging to this customer, oldest first. */
 export function billsForCustomer(sales, phone) {
   const key = normalizePhone(phone);

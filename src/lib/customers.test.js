@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  normalizePhone, isValidPhone, formatPhone, customerKey, blankCustomer,
+  normalizePhone, isValidPhone, formatPhone, customerKey, blankCustomer, captureCustomer,
   billsForCustomer, recomputeStats, withStats, reconcileCustomers, searchCustomers,
   toDayMonth, fromDayMonth, isValidDayMonth,
 } from "./customers.js";
@@ -260,5 +260,91 @@ describe("day-month occasion helpers", () => {
 
   it("allows 29 Feb — it's a real birthday that recurs", () => {
     expect(isValidDayMonth("29-02")).toBe(true);
+  });
+});
+
+describe("captureCustomer — a name on a bill or a booking becomes a customer", () => {
+  const RIYA = { name: "Riya", phone: "9876543210" };
+
+  it("creates a record from a name and a number typed anywhere in the app", () => {
+    const { customers, record, created } = captureCustomer([], { ...RIYA, createdAt: "2026-08-16" });
+    expect(created).toBe(true);
+    expect(customers).toHaveLength(1);
+    // id === phone === the RTDB key, or nothing can find them again.
+    expect(record).toMatchObject({ id: "9876543210", phone: "9876543210", name: "Riya", createdAt: "2026-08-16" });
+  });
+
+  it("normalises the number, so the same person typed three ways is one customer", () => {
+    let list = [];
+    for (const phone of ["+91 98765 43210", "098765 43210", "9876543210"]) {
+      list = captureCustomer(list, { name: "Riya", phone }).customers;
+    }
+    expect(list).toHaveLength(1);
+    expect(list[0].phone).toBe("9876543210");
+  });
+
+  it("refuses a capture the database would reject", () => {
+    // customers/$id validates hasChildren(['id','name']) with a non-empty name, and the record is
+    // keyed by phone — so both halves are required. These would fail AT THE COUNTER, not here.
+    const cases = [
+      { name: "Riya", phone: "" },
+      { name: "Riya", phone: "12345" },
+      { name: "Riya", phone: "5876543210" }, // Indian mobiles start 6–9
+      { name: "", phone: "9876543210" },
+      { name: "   ", phone: "9876543210" },
+      {},
+    ];
+    for (const c of cases) {
+      const out = captureCustomer([], c);
+      expect(out.created).toBe(false);
+      expect(out.record).toBe(null);
+      expect(out.customers).toEqual([]);
+    }
+  });
+
+  it("is a no-op for a customer already on the list, and returns the SAME array", () => {
+    const existing = [{ ...blankCustomer("9876543210", "2020-01-01"), name: "Riya Sharma" }];
+    const out = captureCustomer(existing, RIYA);
+    expect(out.created).toBe(false);
+    expect(out.customers).toBe(existing); // reference-equal → no pointless sync write
+  });
+
+  it("never renames a customer the salon already recorded", () => {
+    // The profile is the curated copy; a name typed in a hurry at a busy till must not clobber a
+    // fuller spelling somebody deliberately corrected.
+    const existing = [{ ...blankCustomer("9876543210", "2020-01-01"), name: "Riya Sharma" }];
+    const { customers } = captureCustomer(existing, { name: "riya", phone: "98765 43210" });
+    expect(customers[0].name).toBe("Riya Sharma");
+  });
+
+  it("fills in a blank name — that is new information, not a competing version of it", () => {
+    const existing = [blankCustomer("9876543210", "2020-01-01")];
+    const out = captureCustomer(existing, RIYA);
+    expect(out.customers[0].name).toBe("Riya");
+    expect(out.created).toBe(false); // the record already existed
+    expect(out.customers).not.toBe(existing);
+    expect(existing[0].name).toBe(""); // and the input was not mutated
+  });
+
+  it("trims the name, and leaves the derived stats alone", () => {
+    const { record } = captureCustomer([], { name: "  Riya  ", phone: "9876543210" });
+    expect(record.name).toBe("Riya");
+    // Visits, spend, points and tier are recomputed from the bills by the reconcilers — capture
+    // must never seed them, or it would be inventing a running total.
+    expect(record).toMatchObject({ totalVisits: 0, totalSpend: 0, lastVisitAt: "", loyaltyPoints: 0, tier: "" });
+  });
+
+  it("survives a null list", () => {
+    expect(captureCustomer(null, RIYA).customers).toHaveLength(1);
+    expect(captureCustomer(undefined, { name: "", phone: "" }).customers).toEqual([]);
+  });
+
+  it("captured customers pick up their visit and spend from the bills, with no extra wiring", () => {
+    // The whole point of capturing: the record exists, so the reconciler can find it. A bill
+    // linked by customerPhone to a customer nobody filed is invisible on the customer list.
+    const { customers } = captureCustomer([], RIYA);
+    const sales = [{ id: "b1", date: "2026-08-16", total: 1200, customerPhone: "9876543210" }];
+    const [reconciled] = reconcileCustomers(customers, sales);
+    expect(reconciled).toMatchObject({ totalVisits: 1, totalSpend: 1200, lastVisitAt: "2026-08-16" });
   });
 });
