@@ -691,18 +691,16 @@ function StoreManager({ user, role, onLogout }) {
   const showOther = otherOpen || myOtherTabs.some(([k]) => k === tab);
 
   // ---- shell shape ----
-  // The only two places the app needs DIFFERENT MARKUP rather than restyled markup: a phone
-  // swaps the sidebar for a bottom bar, and a tablet's icon rail can be expanded over the page.
-  // Everything else responsive is CSS. (In jsdom matchMedia always reports false, so tests keep
+  // The ONE place the app needs different markup rather than restyled markup: a phone swaps the
+  // sidebar for a bottom bar. Everything else responsive is CSS — a tablet now gets the same
+  // full, labelled rail as a laptop. (In jsdom matchMedia always reports false, so tests keep
   // rendering the original desktop shell.)
   const isPhone = useMediaQuery(MQ.phone);
-  const isTabletRail = useMediaQuery(MQ.tablet);
   const updateReady = useUpdateReady();
-  // ONE piece of state for the sidebar-as-overlay, shared by both bands: a tablet expands its
-  // icon rail with it, a phone slides the whole labelled rail in with it. Same element, same
-  // attribute, same close paths — so the two can't drift into behaving differently.
+  // The sidebar-as-drawer, on a phone only: it slides the whole labelled rail in over the page
+  // and cannot stay pinned, because 210px of a 360px screen leaves the till 150px to work in.
   const [railOpen, setRailOpen] = useState(false);
-  const drawerBand = isPhone || isTabletRail;
+  const drawerBand = isPhone;
 
   // A count that rides on a nav entry. Centralised because the same number has to appear in
   // three places — the rail, the bottom bar, and (aggregated) on "More" when the badged tab
@@ -858,14 +856,12 @@ function StoreManager({ user, role, onLogout }) {
       {store.iconStyle === "advanced" && <ServiceIconDefs />}
       {/* ── sidebar ──
           ONE element across every band, so a nav entry is written once and only its presentation
-          changes. Laptop and up: the full rail, exactly as before. Tablet: collapsed to icons by
-          CSS, expandable over the page via data-open. Phone: hidden until data-open, then the
-          same full labelled rail as a drawer — it can't stay pinned open, because ${RAIL_WIDTH}px
-          of a 360px screen leaves the till 150px to work in. */}
+          changes. Tablet and up: the full labelled rail, identical everywhere. Phone: hidden
+          until data-open, then that same rail as a drawer — it can't stay pinned open, because
+          ${RAIL_WIDTH}px of a 360px screen leaves the till 150px to work in. */}
       <nav className="nav" style={S.nav} data-open={railOpen ? "1" : "0"}>
-        {/* Shown by CSS only where the rail is an overlay — the collapsed tablet rail, which
-            needs a way back to its labels, and the phone drawer, which needs a visible close.
-            (The scrim closes it too, but a scrim is not keyboard-reachable and not obvious.) */}
+        {/* Shown by CSS on the phone drawer only, which needs a visible close. (The scrim closes
+            it too, but a scrim is not keyboard-reachable and not obvious.) */}
         <button
           className="navbtn railtoggle"
           onClick={() => setRailOpen((o) => !o)}
@@ -910,8 +906,8 @@ function StoreManager({ user, role, onLogout }) {
         {accountBlock({ pushDown: !allow("backup.use") })}
         <div className="navfoot" style={{ fontSize: 11, color: "#6E8A7C", padding: "6px 14px 8px" }}>{statusFoot}</div>
       </nav>
-      {/* Scrim behind the open drawer, on a phone and on a tablet alike: the rail overlays the
-          page, so a tap anywhere else has to put it away again. */}
+      {/* Scrim behind the open drawer, on a phone: the rail overlays the page, so a tap
+          anywhere else has to put it away again. */}
       {railOpen && drawerBand && (
         <div className="rail-scrim" onClick={() => setRailOpen(false)} aria-hidden="true" />
       )}

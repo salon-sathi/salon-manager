@@ -463,7 +463,7 @@ into the CSS block — **no width is typed twice**. `deviceClass()` is pure and 
 | Band | Width | Shell |
 |---|---|---|
 | phone | ≤ 599 | sidebar as a **drawer** (`☰`, or "More"); bottom tab bar of 4 alongside it |
-| tablet | 600–1023 | sidebar collapsed to a 64px icon rail, `☰` expands it *over* the page |
+| tablet | 600–1023 | the full labelled rail, same as a laptop; only the gutters tighten |
 | laptop | 1024–1439 | the original layout, untouched |
 | desktop / wide | ≥ 1440 | same, content to `CONTENT_MAX` (1600, was 1280) |
 
@@ -473,9 +473,17 @@ window is a narrow one driven by a mouse. Keying touch sizing on width is what u
 zoom on every input.
 
 **The sidebar is ONE element in every band** — `.nav`, with `data-open` on it — so a nav entry is
-written once and only its presentation changes. `railOpen` is the single piece of state behind it:
-a tablet expands its icon rail with it, a phone slides the whole labelled rail in with it. Both
-close on Escape, on the scrim, and on picking a destination.
+written once and only its presentation changes. `railOpen` is the single piece of state behind it,
+and it now belongs to the **phone alone**: the drawer slides the whole labelled rail in, and closes
+on Escape, on the scrim, and on picking a destination.
+
+**The tablet band does not collapse the rail, and shouldn't be made to again.** It used to shrink
+to a 64px icon strip with `☰` to expand it, on the arithmetic that `RAIL_WIDTH` is a third of a
+768px screen. The arithmetic was right and the conclusion was wrong: this nav's marks are `⊟`, `∑`,
+`▦`, `⊝` — decorative glyphs, not icons anyone reads cold — so every navigation became tap-`☰`,
+read, tap again. Reported from a real device. The space comes out of the content gutters instead
+(`.main { padding:18px 16px }`), which costs nobody a decision. A phone is a genuinely different
+problem and keeps its drawer.
 
 Two things about the phone drawer specifically:
 

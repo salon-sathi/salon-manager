@@ -10,8 +10,9 @@
 //   phone    ≤ 599   a phone held in one hand at the counter. No room for a rail at all —
 //                    navigation moves to a bottom tab bar within thumb reach.
 //   tablet   600–1023 an iPad/Android tab, either orientation, and a small laptop window.
-//                    A 210px rail would eat a third of a 768px portrait screen, so the rail
-//                    collapses to icons and the two-pane splits stack.
+//                    Same full, labelled rail as a laptop — the rail used to collapse to icons
+//                    here, but this nav's glyphs don't read on their own, so it cost a tap and
+//                    a guess per navigation. The two-pane splits still stack.
 //   laptop   1024–1439 the original desktop layout, unchanged.
 //   desktop  1440–1919 same layout, content allowed to grow to CONTENT_MAX.
 //   wide     ≥ 1920  same again; the calendar and wide tables may run past CONTENT_MAX.
@@ -39,14 +40,15 @@ export const MAX = {
 
 /**
  * Media-query strings, named for what they mean to the app rather than for their width.
- * `compact` is the important one: it covers phone AND tablet, i.e. every width where the
- * full 210px sidebar does not earn its space.
+ * `compact` covers phone AND tablet — every width where the CONTENT has to adapt (the
+ * two-pane splits stack, the gutters tighten). It no longer implies anything about the
+ * sidebar: only a phone replaces that.
  */
 export const MQ = {
   phone: `(max-width: ${MAX.phone}px)`,
   tabletUp: `(min-width: ${BREAKPOINTS.tablet}px)`,
   tablet: `(min-width: ${BREAKPOINTS.tablet}px) and (max-width: ${MAX.tablet}px)`,
-  compact: `(max-width: ${MAX.tablet}px)`, // phone + tablet: no full rail
+  compact: `(max-width: ${MAX.tablet}px)`, // phone + tablet: the content column adapts
   laptopUp: `(min-width: ${BREAKPOINTS.laptop}px)`,
   desktopUp: `(min-width: ${BREAKPOINTS.desktop}px)`,
   wideUp: `(min-width: ${BREAKPOINTS.wide}px)`,
@@ -65,9 +67,8 @@ export const CONTENT_MAX = 1600;
  *  desktop keeps its original density. */
 export const TOUCH_TARGET = 44;
 
-/** Sidebar widths: the full rail, and the icon-only rail used across the tablet band. */
+/** Sidebar width. One value now: every band that shows a rail shows this one, labels and all. */
 export const RAIL_WIDTH = 210;
-export const RAIL_WIDTH_ICONS = 64;
 
 /**
  * Which band a viewport width falls in.
@@ -83,5 +84,6 @@ export function deviceClass(width) {
   return "wide";
 }
 
-/** True where the full 210px sidebar is replaced (phone tab bar, or tablet icon rail). */
+/** True across phone + tablet: the bands where the CONTENT adapts (splits stack, gutters
+ *  tighten). Not a statement about the sidebar — only a phone replaces that. */
 export const isCompact = (width) => deviceClass(width) === "phone" || deviceClass(width) === "tablet";

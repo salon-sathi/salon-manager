@@ -1,6 +1,6 @@
 // The app's inline style objects and its one big stylesheet.
 
-import { BREAKPOINTS, CONTENT_MAX, MAX, RAIL_WIDTH, RAIL_WIDTH_ICONS, TOUCH_TARGET } from "../breakpoints.js";
+import { BREAKPOINTS, CONTENT_MAX, MAX, RAIL_WIDTH, TOUCH_TARGET } from "../breakpoints.js";
 
 // ---------- styles ----------
 const S = {
@@ -276,44 +276,31 @@ const CSS = `
   }
 
   /* ── Shell: tablet (${BREAKPOINTS.tablet}–${MAX.tablet}px) ───────────────────────────────
-     A ${RAIL_WIDTH}px rail is a third of a 768px portrait tablet. It collapses to icons, and the
-     ☰ at its head expands it back over the content (position:fixed, not re-flowed) so the page
-     underneath never jumps while you navigate. Every nav button keeps its title/aria-label, so
-     the label is still reachable by long-press and by a screen reader while collapsed. */
+     The rail stays FULL WIDTH and LABELLED here, exactly as the laptop shows it.
+
+     It used to collapse to a 64px icon strip with a ☰ to expand it back over the page, on the
+     reasoning that ${RAIL_WIDTH}px is a third of a 768px portrait tablet. That was the wrong
+     trade for this nav. Its destinations are glyphs like "⊟", "∑", "▦" and "⊝" — they are
+     decorative marks, not icons anyone can read cold, so a collapsed rail turned every
+     navigation into tap-☰, read, tap-again. The space comes back out of the content padding
+     below instead, which costs nothing anybody has to think about.
+
+     A phone still swaps the rail for a bottom bar: ${RAIL_WIDTH}px of a 360px screen leaves the
+     till 150px to work in, which is a different problem from a tablet's. */
   .railtoggle { display:none; }
   /* The rail's footer blocks (Backup / Restore, Reset / Logout). Their display lives here, not
      inline, so the collapsed tablet rail can hide them — see the tablet band below. */
   .navrow { display:flex; gap:6px; }
   .rail-scrim { position:fixed; inset:0; z-index:125; background:var(--overlay-bg, rgba(15,30,20,.45)); }
   @media (min-width: ${BREAKPOINTS.tablet}px) and (max-width: ${MAX.tablet}px) {
-    /* width/padding/position/display below are all !important for one reason: S.nav and S.main
-       set them INLINE, and a normal stylesheet declaration loses to an inline one. */
-    .nav { width:${RAIL_WIDTH_ICONS}px !important; padding:12px 8px !important; }
-    .nav .navbtn { justify-content:center; padding:11px 0; gap:0; }
-    .nav .navbtn.sub { padding-left:0; }
-    .nav .navbtn.sub::before { display:none; }
-    .nav .navlabel, .nav .navfoot, .nav .navshop, .nav .navgrouplabel, .nav .navchev { display:none; }
-    /* margin is !important because S.badge sets marginLeft inline for the full rail. */
-    .nav .navbtn .badge-n { position:absolute; top:2px; right:2px; margin:0 !important; }
-    .nav .railtoggle { display:flex; justify-content:center; font-size:16px; }
-    /* "Restore (JSON / XLSX)" cannot be squeezed into a 64px column — abbreviated it reads as
-       nothing, and left alone it spills out of the rail. The footer blocks are hidden while the
-       rail is collapsed and come back when it is expanded, which is one tap on the ☰ above. */
-    .nav .navutil { display:none; }
-    /* Expanded: floats over the page rather than re-flowing it, so the content column doesn't
-       jump sideways every time the menu is opened. */
-    .nav[data-open="1"] { position:fixed !important; z-index:130; width:${RAIL_WIDTH}px !important;
-      box-shadow:12px 0 40px rgba(0,0,0,.35); }
-    .nav[data-open="1"] .navbtn { justify-content:flex-start; padding:10px 12px; gap:6px; }
-    .nav[data-open="1"] .navbtn.sub { padding-left:26px; }
-    .nav[data-open="1"] .navbtn.sub::before { display:block; }
-    .nav[data-open="1"] .navlabel, .nav[data-open="1"] .navfoot,
-    .nav[data-open="1"] .navshop, .nav[data-open="1"] .navgrouplabel,
-    .nav[data-open="1"] .navchev { display:revert; }
-    .nav[data-open="1"] .navbtn .badge-n { position:static; }
-    .nav[data-open="1"] .navutil { display:block; }
-    .nav[data-open="1"] .navrow { display:flex; }
+    /* !important because S.main sets padding INLINE, and a stylesheet declaration loses to an
+       inline one. This is the whole tablet adaptation now: the rail is left alone and the
+       content column gives up its generous desktop gutters instead. */
     .main { padding:18px 16px !important; }
+    /* The rail is the same 210px it is on a laptop, so on a 600px screen it is a third of the
+       width. Tighten its own padding a little to claw some of that back without touching a
+       single label. */
+    .nav { padding:14px 8px !important; }
   }
 
   /* ── Shell: phone (≤${MAX.phone}px) ──────────────────────────────────────────────────────

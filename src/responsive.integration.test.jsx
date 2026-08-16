@@ -87,6 +87,26 @@ function stubViewport(width) {
   };
 }
 
+/**
+ * The body of one `@media` block, by its condition.
+ *
+ * Asserting against the whole stylesheet cannot tell "the tablet band does not shrink the
+ * rail" from "no band anywhere shrinks the rail" — the phone band legitimately hides labels,
+ * so a document-wide `not.toContain(".navlabel")` would be answering a different question.
+ * Brace-matched rather than regexed to the next `}`, since these blocks contain nested rules.
+ */
+function bandBlock(css, condition) {
+  const at = css.indexOf(`@media ${condition}`);
+  if (at === -1) return "";
+  const open = css.indexOf("{", at);
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
+  }
+  return "";
+}
+
 /** Mount the real app and hand back the container plus its shipped stylesheet. */
 async function mountApp() {
   await preloadViews();
@@ -186,17 +206,21 @@ describe("responsive — the shell each device gets", () => {
     expect(container.querySelector(".topbar"), "no phone top bar on a laptop").toBeFalsy();
   });
 
-  it("keeps the sidebar on a tablet, collapsed rather than removed", async () => {
+  it("gives a tablet the same full, labelled rail as a laptop", async () => {
     stubViewport(768); // iPad portrait
     live = await mountApp();
     const { container } = live;
 
     expect(container.querySelector(".nav"), "a tablet keeps the rail").toBeTruthy();
     expect(container.querySelector(".tabbar"), "a tablet is not a phone").toBeFalsy();
-    expect(
-      container.querySelector(".nav .railtoggle"),
-      "the collapsed rail needs its expand control, or its icons are unlabelled with no way back"
-    ).toBeTruthy();
+
+    // The rail used to collapse to a 64px icon strip across this band, with a ☰ to get the
+    // labels back. jsdom lays nothing out, so the assertion has to be on the rules: nothing
+    // in the tablet band may shrink the rail or hide a label.
+    const tabletBand = bandBlock(live.css, `(min-width: ${BREAKPOINTS.tablet}px) and (max-width: ${MAX.tablet}px)`);
+    expect(tabletBand, "the tablet band still exists — it tightens the content gutters").toBeTruthy();
+    expect(tabletBand).not.toContain("width:64px");
+    expect(tabletBand, "a hidden .navlabel is the icon rail coming back").not.toContain(".navlabel");
   });
 });
 

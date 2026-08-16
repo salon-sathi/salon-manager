@@ -33,10 +33,13 @@ export async function signIn(page, role) {
 
   await submitSignIn(page, account.email);
 
-  // Sign-in is a real auth round trip, then RoleGate's own subscription to shop/users/<uid>
-  // ("Checking your access…"), then the first snapshot of every readable slice. The nav is
-  // the first thing that proves all three landed.
-  await expect(navItem(page, "Dashboard")).toBeVisible({ timeout: 30_000 });
+  // Sign-in is a real auth round trip, then RoleGate's own subscription to shop/users<uid>
+  // ("Checking your access…"), then the first snapshot of every readable slice. The shell's
+  // <main> renders only once all three have landed, which is what makes it the signal.
+  //
+  // Deliberately NOT a nav button: the sidebar is a drawer on a phone, so waiting on one
+  // would make this helper silently desktop-only and hang every narrow-viewport spec.
+  await expect(page.locator("main.main")).toBeVisible({ timeout: 30_000 });
 
   return account;
 }
