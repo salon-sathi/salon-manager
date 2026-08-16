@@ -462,7 +462,7 @@ into the CSS block — **no width is typed twice**. `deviceClass()` is pure and 
 
 | Band | Width | Shell |
 |---|---|---|
-| phone | ≤ 599 | sidebar hidden; bottom tab bar (4 tabs + More sheet) |
+| phone | ≤ 599 | sidebar as a **drawer** (`☰`, or "More"); bottom tab bar of 4 alongside it |
 | tablet | 600–1023 | sidebar collapsed to a 64px icon rail, `☰` expands it *over* the page |
 | laptop | 1024–1439 | the original layout, untouched |
 | desktop / wide | ≥ 1440 | same, content to `CONTENT_MAX` (1600, was 1280) |
@@ -471,6 +471,26 @@ Pointer type is a **separate axis** from width: touch sizing hangs off `(pointer
 styling off `(hover: hover)`. A 1024px tablet is a wide screen driven by a fingertip; a 900px laptop
 window is a narrow one driven by a mouse. Keying touch sizing on width is what used to make an iPad
 zoom on every input.
+
+**The sidebar is ONE element in every band** — `.nav`, with `data-open` on it — so a nav entry is
+written once and only its presentation changes. `railOpen` is the single piece of state behind it:
+a tablet expands its icon rail with it, a phone slides the whole labelled rail in with it. Both
+close on Escape, on the scrim, and on picking a destination.
+
+Two things about the phone drawer specifically:
+
+- **Closed is `display:none`, never a transform off-screen.** A drawer that is merely translated
+  away is still in the tab order and still announced, so a keyboard or VoiceOver user walks through
+  22 invisible links before reaching the page.
+- **It does not stay pinned open, and shouldn't be made to.** `RAIL_WIDTH` of a 360px screen leaves
+  the till 150px — the POS tiles, the tables and the diary don't survive it. That is the whole
+  reason it is a drawer rather than a permanent rail.
+
+The bottom bar and the drawer are not two navigations: the bar is the four screens used all day in
+thumb reach, the drawer is *the sidebar*, complete. **"More" opens the same drawer the `☰` does** —
+an earlier version gave it a bottom sheet of its own listing the leftover tabs, which is two
+overlapping lists to keep in step. Opening the drawer on a phone also expands the "Other" group
+(`setOtherOpen(true)`), or a secondary screen would sit three taps deep.
 
 ### Four things that will bite
 

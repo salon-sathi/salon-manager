@@ -115,13 +115,12 @@ const CSS = `
        other surface here is a translucent glass fill, and a translucent pin would let the rest
        of the row scroll visibly through it. Matched to the modal's ground, not to --surface. */
     --tbl-sticky-bg:#241D2C;
-    /* Opaque grounds for the phone chrome. --nav-bg is only 72% opaque, which works for the
+    /* Opaque ground for the phone's two bars. --nav-bg is only 72% opaque, which works for the
        sidebar because the sidebar is the one surface allowed a backdrop-filter — it frosts what
-       sits behind it. The bottom bar, the top bar and the sheet all lie over SCROLLING content
-       and so are barred from blurring (the blur budget), which leaves 28% of the page reading
-       straight through them. These are the same colours, made solid. */
+       sits behind it, and it keeps that treatment as a drawer because a drawer sits STILL. The
+       top and bottom bars lie over SCROLLING content and so are barred from blurring (the blur
+       budget), which would leave 28% of the page reading through them. Same colour, made solid. */
     --bar-bg:#1B1522;
-    --sheet-bg:#241D2C;
     --blocked-fill:repeating-linear-gradient(45deg, rgba(255,255,255,.04), rgba(255,255,255,.04) 5px, rgba(255,255,255,.10) 5px, rgba(255,255,255,.10) 10px);
     --blocked-ink:var(--text-mid);
     /* Secondary surfaces: inner cards/rows/boxes that sit ON a panel, and the tinted callouts.
@@ -210,7 +209,7 @@ const CSS = `
   @media print {
     [data-theme] { --bg-base:#fff; --bg-gradient:none; --surface:#fff; --border:#000; --text-hi:#000;
       --text-mid:#000; --panelhead:#000; --nav-bg:#fff; --modal-bg:#fff; --font-display:inherit; }
-    [data-theme] .nav, .topbar, .tabbar, .sheet, .sheet-scrim { display:none !important; }
+    [data-theme] .nav, .topbar, .tabbar, .rail-scrim { display:none !important; }
     [data-theme] .main { padding:0 !important; max-width:none !important; }
     [data-theme] * { backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
       background-image:none !important; box-shadow:none !important; color:#000 !important; }
@@ -318,16 +317,35 @@ const CSS = `
   }
 
   /* ── Shell: phone (≤${MAX.phone}px) ──────────────────────────────────────────────────────
-     The sidebar goes away entirely. 22 tabs wrapped into a block cost ~300px above every
-     screen — 40% of an iPhone SE. Navigation moves to a bottom bar within thumb reach, with
-     the rest of the tabs (and Backup / Reset / Logout) in a sheet behind "More".
-     Both bars pay back the viewport-fit=cover in index.html with safe-area padding, so nothing
-     lands under the notch or the home indicator. */
+     The sidebar becomes a DRAWER: the same full, labelled rail the laptop shows, opened from
+     the ☰ in the top bar (or from "More" in the bottom bar) and laid over the page. It cannot
+     stay pinned open — a ${RAIL_WIDTH}px rail on a 360px phone leaves 150px of content, which
+     the POS tiles, the tables and the diary do not survive. So the page keeps its full width
+     and the rail arrives on demand, complete, with every label intact.
+
+     Navigation is therefore TWO things that do different jobs: the bottom bar is the four
+     screens used all day, in thumb reach; the drawer is everything, spelled out.
+
+     Both pay back the viewport-fit=cover in index.html with safe-area padding, so nothing lands
+     under the notch or the home indicator. */
   @media (max-width: ${MAX.phone}px) {
-    /* display/padding/max-width are !important because S.nav and S.main declare them INLINE.
-       Without it the 210px rail simply stays put, shoves the content column off the right of a
-       390px screen, and the bottom bar it was replaced by lands on top of it. */
+    /* display/position/padding/max-width are !important because S.nav and S.main declare them
+       INLINE. Without it the ${RAIL_WIDTH}px rail simply stays put, shoves the content column
+       off the right of a 390px screen, and the bottom bar lands on top of it. */
+
+    /* Closed: display:none, NOT a transform off-screen. A drawer that is merely translated away
+       is still in the tab order and still read out by a screen reader, so a keyboard or
+       VoiceOver user walks into 22 invisible links before reaching the page. */
     .nav { display:none !important; }
+    .nav[data-open="1"] {
+      display:flex !important; position:fixed !important; top:0; left:0; z-index:130;
+      width:${RAIL_WIDTH}px !important;
+      padding:calc(env(safe-area-inset-top) + 14px) 10px calc(env(safe-area-inset-bottom) + 12px) !important;
+      box-shadow:12px 0 40px rgba(0,0,0,.4);
+    }
+    /* The rail's own ☰ becomes the drawer's close button — the scrim closes it too, but a
+       visible control is what makes that discoverable and keyboard-reachable. */
+    .nav[data-open="1"] .railtoggle { display:flex; justify-content:center; font-size:18px; }
     .app { flex-direction:column; }
     .main { padding:14px 12px !important; max-width:none !important;
       /* clear the fixed tab bar, plus the home indicator below it */
@@ -356,29 +374,17 @@ const CSS = `
   .tabbtn.active::before { content:""; position:absolute; top:0; left:50%; transform:translateX(-50%);
     width:26px; height:3px; border-radius:0 0 3px 3px; background:var(--brand); }
   /* Unread/low-stock count on a bottom-bar item, and the aggregate dot on "More" when the
-     badged tab is hidden inside the sheet. */
+     badged tab is behind "More". */
   .tabbtn .tabbadge { position:absolute; top:4px; left:50%; margin-left:4px; background:#C44536;
     color:#fff; font-size:9.5px; font-weight:800; border-radius:9px; padding:0 5px; line-height:15px;
     min-width:15px; text-align:center; }
 
-  /* The "More" sheet. A bottom sheet rather than a centred dialog: it opens from the bar that
-     summoned it and stays inside thumb reach. dvh, not vh — vh on iOS is the tallest the
-     viewport ever gets, so a vh-sized sheet hides its own last row behind the browser chrome. */
-  .sheet-scrim { position:fixed; inset:0; z-index:110; background:var(--overlay-bg, rgba(15,30,20,.45)); }
-  .sheet { position:fixed; left:0; right:0; bottom:0; z-index:120; max-height:82dvh; overflow:auto;
-    -webkit-overflow-scrolling:touch; background:var(--sheet-bg, #fff);
-    border-radius:18px 18px 0 0; border-top:1px solid var(--border, #E2EAE3);
-    padding:8px 12px calc(14px + env(safe-area-inset-bottom));
-    box-shadow:0 -14px 44px rgba(0,0,0,.3); }
-  .sheet-grip { width:38px; height:4px; border-radius:4px; background:var(--border, #D5E0D6);
-    margin:6px auto 10px; }
-  /* Inside the sheet the rail's own buttons are reused, so they need the rail's ink back —
-     the sheet sits on a light panel, not on the dark nav. */
-  .sheet .navbtn { color:var(--text-hi, #1E2421); }
-  .sheet .navbtn:hover { background:var(--brand-soft); color:var(--brand-soft-text); }
-  .sheet .navbtn.active { background:var(--brand); color:#fff; }
-  .sheet .navbtn.util { background:var(--btn-bg, var(--brand-soft)); color:var(--btn-fg, var(--brand-soft-text));
-    border:1px solid var(--border, #D5E0D6); }
+  /* The ☰ that opens the drawer, in the phone top bar. Sized to the touch floor so it is a real
+     target rather than a decorative glyph. */
+  .topbtn { display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    min-width:${TOUCH_TARGET}px; min-height:${TOUCH_TARGET}px; margin-left:-8px;
+    background:none; border:none; border-radius:10px; color:var(--nav-hi);
+    font-family:inherit; font-size:19px; line-height:1; cursor:pointer; }
 
   /* ── Page headers ────────────────────────────────────────────────────────────────────────
      Once the actions wrap onto their own line, "pushed right by margin-left:auto" is the wrong
@@ -460,7 +466,6 @@ const CSS = `
     .topbar { position:static; }
     .tabbtn { min-height:46px; font-size:9.5px; }
     .tabbtn .tabico { font-size:15px; }
-    .sheet { max-height:92dvh; }
   }
 `;
 

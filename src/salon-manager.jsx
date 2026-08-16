@@ -698,12 +698,15 @@ function StoreManager({ user, role, onLogout }) {
   const isPhone = useMediaQuery(MQ.phone);
   const isTabletRail = useMediaQuery(MQ.tablet);
   const updateReady = useUpdateReady();
-  const [railOpen, setRailOpen] = useState(false); // tablet: icon rail expanded over the content
-  const [moreOpen, setMoreOpen] = useState(false); // phone: the "More" sheet
+  // ONE piece of state for the sidebar-as-overlay, shared by both bands: a tablet expands its
+  // icon rail with it, a phone slides the whole labelled rail in with it. Same element, same
+  // attribute, same close paths — so the two can't drift into behaving differently.
+  const [railOpen, setRailOpen] = useState(false);
+  const drawerBand = isPhone || isTabletRail;
 
-  // A count that rides on a nav entry. Centralised because the same number now has to appear in
-  // three places — the rail, the bottom bar, and (aggregated) on "More" when its tab is inside
-  // the sheet — and three copies of this ternary would drift.
+  // A count that rides on a nav entry. Centralised because the same number has to appear in
+  // three places — the rail, the bottom bar, and (aggregated) on "More" when the badged tab
+  // isn't one of the four the bar could fit — and three copies of this ternary would drift.
   const tabBadge = useCallback(
     (k) => (k === "inventory" ? lowStock.length : k === "alerts" && tabEnabled("alerts") ? alertCount : 0),
     [lowStock.length, alertCount]
@@ -722,33 +725,42 @@ function StoreManager({ user, role, onLogout }) {
     return picked.slice(0, 4);
   }, [myTopTabs]);
   const onBar = new Set(phoneTabs.map(([k]) => k));
-  // Everything the bar couldn't fit, in rail order, so the sheet reads like the sidebar does.
-  const sheetTabs = [...myTopTabs.filter(([k]) => !onBar.has(k)), ...myOtherTabs];
-  const moreBadge = sheetTabs.reduce((n, [k]) => n + tabBadge(k), 0);
+  // What the bottom bar couldn't fit. Only used for the aggregate badge and for lighting "More"
+  // when the current screen is one of them — the drawer itself always lists the full sidebar,
+  // because a drawer that showed a subset would be a second, competing navigation.
+  const offBarTabs = [...myTopTabs.filter(([k]) => !onBar.has(k)), ...myOtherTabs];
+  const moreBadge = offBarTabs.reduce((n, [k]) => n + tabBadge(k), 0);
 
-  // Close both overlays when the viewport grows past the band that owns them — otherwise
-  // rotating a tablet to landscape leaves a sheet or an expanded rail stranded on a desktop
-  // layout, covering content with no visible way back.
-  useEffect(() => { if (!isPhone) setMoreOpen(false); }, [isPhone]);
-  useEffect(() => { if (!isTabletRail) setRailOpen(false); }, [isTabletRail]);
+  // Close the drawer when the viewport grows past both bands that have one — otherwise rotating
+  // a phone to landscape leaves an expanded rail stranded over a desktop layout, covering the
+  // content with no visible way back.
+  useEffect(() => { if (!drawerBand) setRailOpen(false); }, [drawerBand]);
 
-  // While the sheet is open the page behind it must not scroll: on iOS a swipe that starts on
-  // the sheet otherwise scrolls the document underneath and the sheet appears to drift away.
+  // While the drawer is open the page behind it must not scroll: on iOS a swipe that starts on
+  // the drawer otherwise scrolls the document underneath and the drawer appears to drift away.
+  // Escape closes it, which is also what makes it dismissable without a pointer.
   useEffect(() => {
-    if (!moreOpen) return undefined;
+    if (!railOpen) return undefined;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e) => { if (e.key === "Escape") setMoreOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setRailOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = previous;
       window.removeEventListener("keydown", onKey);
     };
-  }, [moreOpen]);
+  }, [railOpen]);
 
-  // Picking a tab from either overlay closes it — a nav that stays open over the page it just
-  // navigated to reads as a stuck menu.
-  const goTab = useCallback((k) => { setTab(k); setMoreOpen(false); setRailOpen(false); }, []);
+  // Opening the drawer on a phone expands the "Other" group. The rail collapses it on a desktop
+  // to keep the sidebar short, but a full-height drawer has the room — and leaving it shut would
+  // put a secondary screen three taps away (More → Other → Vendor Bills), which is further than
+  // it was before the sidebar came back. Setting the state rather than forcing it in the render
+  // keeps the group's own chevron working.
+  useEffect(() => { if (railOpen && isPhone) setOtherOpen(true); }, [railOpen, isPhone]);
+
+  // Picking a tab closes the drawer — a nav that stays open over the page it just navigated to
+  // reads as a stuck menu.
+  const goTab = useCallback((k) => { setTab(k); setRailOpen(false); }, []);
 
   // ---- the render switch, with a permission guard on every gated view ----
   // `guard` is the second enforcement layer. The nav already hides what a role can't reach, but
@@ -845,20 +857,22 @@ function StoreManager({ user, role, onLogout }) {
           the flat theme strokes in the current text colour and never references them. */}
       {store.iconStyle === "advanced" && <ServiceIconDefs />}
       {/* ── sidebar ──
-          Laptop and up: the full rail, exactly as before. Tablet: the same element collapsed to
-          icons by CSS, expandable over the page via data-open. Phone: display:none — the bottom
-          bar below takes over. It stays ONE element across all three so a nav entry is written
-          once; only its presentation changes. */}
+          ONE element across every band, so a nav entry is written once and only its presentation
+          changes. Laptop and up: the full rail, exactly as before. Tablet: collapsed to icons by
+          CSS, expandable over the page via data-open. Phone: hidden until data-open, then the
+          same full labelled rail as a drawer — it can't stay pinned open, because ${RAIL_WIDTH}px
+          of a 360px screen leaves the till 150px to work in. */}
       <nav className="nav" style={S.nav} data-open={railOpen ? "1" : "0"}>
-        {/* Only rendered in the tablet band (CSS), where the rail is icon-only and needs a way
-            back to its labels. */}
+        {/* Shown by CSS only where the rail is an overlay — the collapsed tablet rail, which
+            needs a way back to its labels, and the phone drawer, which needs a visible close.
+            (The scrim closes it too, but a scrim is not keyboard-reachable and not obvious.) */}
         <button
           className="navbtn railtoggle"
           onClick={() => setRailOpen((o) => !o)}
           aria-expanded={railOpen}
-          aria-label={railOpen ? "Collapse menu" : "Expand menu"}
-          title={railOpen ? "Collapse menu" : "Expand menu"}
-        >☰</button>
+          aria-label={railOpen ? "Close menu" : "Expand menu"}
+          title={railOpen ? "Close menu" : "Expand menu"}
+        >{railOpen ? "✕" : "☰"}</button>
         <div style={S.logo}>
           <img src={store.logo || LOGO_SRC} alt={store.name} style={{ width: 42, height: 42, borderRadius: 10, objectFit: "contain", background: "#fff", padding: 2, flexShrink: 0 }} />
           <div className="navshop">
@@ -896,17 +910,24 @@ function StoreManager({ user, role, onLogout }) {
         {accountBlock({ pushDown: !allow("backup.use") })}
         <div className="navfoot" style={{ fontSize: 11, color: "#6E8A7C", padding: "6px 14px 8px" }}>{statusFoot}</div>
       </nav>
-      {/* Scrim behind the expanded tablet rail: it overlays the page, so a tap anywhere else
-          has to put it away again. */}
-      {railOpen && isTabletRail && (
+      {/* Scrim behind the open drawer, on a phone and on a tablet alike: the rail overlays the
+          page, so a tap anywhere else has to put it away again. */}
+      {railOpen && drawerBand && (
         <div className="rail-scrim" onClick={() => setRailOpen(false)} aria-hidden="true" />
       )}
 
       {/* ── phone top bar ──
-          Carries the shop's identity, which the bottom bar has no room for, and doubles as the
-          at-a-glance sync light so the pill at the bottom isn't the only place it lives. */}
+          Carries the ☰ that opens the sidebar, the shop's identity (which the bottom bar has no
+          room for), and the at-a-glance sync light so the pill at the bottom isn't the only
+          place it lives. */}
       {isPhone && (
         <header className="topbar">
+          <button
+            className="topbtn"
+            onClick={() => setRailOpen((o) => !o)}
+            aria-expanded={railOpen}
+            aria-label={railOpen ? "Close menu" : "Open menu"}
+          >☰</button>
           <img src={store.logo || LOGO_SRC} alt="" aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 8, objectFit: "contain", background: "#fff", padding: 2, flexShrink: 0 }} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: "-0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{store.name}</div>
@@ -929,9 +950,11 @@ function StoreManager({ user, role, onLogout }) {
       </main>
 
       {/* ── phone bottom bar ──
-          Four tabs plus "More", pinned within thumb reach. The badge on "More" aggregates the
-          counts of every tab hidden inside it, so a low-stock warning is never invisible just
-          because Inventory didn't make the bar. */}
+          Four tabs plus "More", pinned within thumb reach. "More" opens the SAME drawer the ☰
+          does, rather than a second list of its own: two overlays showing overlapping sets of
+          the same tabs is how they drift apart, and the sidebar is already the complete answer.
+          Its badge aggregates the counts of every tab the bar couldn't fit, so a low-stock
+          warning is never invisible just because Inventory didn't make the four. */}
       {isPhone && (
         <nav className="tabbar" aria-label="Main">
           {phoneTabs.map(([k, ic, label]) => (
@@ -947,34 +970,16 @@ function StoreManager({ user, role, onLogout }) {
             </button>
           ))}
           <button
-            className={"tabbtn" + (moreOpen || sheetTabs.some(([k]) => k === tab) ? " active" : "")}
-            onClick={() => setMoreOpen((o) => !o)}
-            aria-expanded={moreOpen}
-            aria-haspopup="menu"
+            className={"tabbtn" + (railOpen || offBarTabs.some(([k]) => k === tab) ? " active" : "")}
+            onClick={() => setRailOpen((o) => !o)}
+            aria-expanded={railOpen}
+            aria-label={railOpen ? "Close menu" : "Open menu"}
           >
             <span className="tabico" aria-hidden="true">⋯</span>
             <span className="tablabel">More</span>
-            {!moreOpen && moreBadge > 0 && <span className="tabbadge">{moreBadge}</span>}
+            {!railOpen && moreBadge > 0 && <span className="tabbadge">{moreBadge}</span>}
           </button>
         </nav>
-      )}
-
-      {/* ── the "More" sheet ──
-          Everything the bar couldn't fit, in rail order, plus the account actions that live at
-          the foot of the sidebar on a desktop. */}
-      {isPhone && moreOpen && (
-        <>
-          <div className="sheet-scrim" onClick={() => setMoreOpen(false)} aria-hidden="true" />
-          <div className="sheet" role="menu" aria-label="More">
-            <div className="sheet-grip" aria-hidden="true" />
-            {sheetTabs.map(([k, ic, label]) => (
-              <NavButton key={k} icon={ic} label={label} active={tab === k} badge={tabBadge(k)} onClick={() => goTab(k)} />
-            ))}
-            {allow("backup.use") && backupBlock({ first: false })}
-            {accountBlock({ pushDown: false })}
-            <div style={{ fontSize: 11, color: "var(--text-mid, #6E8A7C)", padding: "10px 14px 4px" }}>{statusFoot}</div>
-          </div>
-        </>
       )}
 
       {toast && <div className="toast" style={S.toast}>{toast}</div>}

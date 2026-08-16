@@ -104,43 +104,75 @@ let live = null;
 afterEach(() => { live?.cleanup(); live = null; delete window.matchMedia; });
 
 describe("responsive — the shell each device gets", () => {
-  it("gives a phone a bottom tab bar instead of the 22-item sidebar", async () => {
-    // The regression this guards: the sidebar used to become a wrapped row of every tab, which
-    // cost ~300px above every screen — 40% of an iPhone SE.
+  const drawer = (container) => container.querySelector('.nav[data-open="1"]');
+  const openers = (container) =>
+    [...container.querySelectorAll("button")].filter((b) => /^(Open|Close) menu$/.test(b.getAttribute("aria-label") || ""));
+
+  it("gives a phone BOTH the sidebar and a bottom tab bar", async () => {
+    // Two regressions in one. The sidebar used to become a wrapped row of all 22 tabs, costing
+    // ~300px above every screen (40% of an iPhone SE); the fix for that then removed it from
+    // phones entirely, which left the salon with no sidebar at all. It is present now — as a
+    // drawer, so it costs no width until it is asked for.
     stubViewport(390); // iPhone 14/15/16
     live = await mountApp();
     const { container } = live;
 
+    expect(container.querySelector(".nav"), "the sidebar must exist on a phone").toBeTruthy();
     const bar = container.querySelector(".tabbar");
-    expect(bar, "a phone should get the bottom tab bar").toBeTruthy();
+    expect(bar, "and the bottom tab bar rides alongside it").toBeTruthy();
     // Four tabs + More. More than five targets across 360px is below thumb accuracy.
     expect(bar.querySelectorAll(".tabbtn").length).toBe(5);
-    expect(
-      [...bar.querySelectorAll(".tabbtn")].some((b) => /More/.test(b.textContent)),
-      "the last slot is the More sheet, which is how the other 18 tabs stay reachable"
-    ).toBe(true);
     expect(container.querySelector(".topbar"), "a phone gets the shop-name top bar").toBeTruthy();
+    // Closed by default, and closed means data-open="0" — which the CSS turns into display:none,
+    // so the 22 links are out of the tab order rather than merely pushed off-screen.
+    expect(drawer(container), "the drawer starts closed").toBeFalsy();
   });
 
-  it("opens every remaining tab, and the account actions, from the More sheet", async () => {
+  it("opens the full labelled sidebar from the ☰ and from More, and closes it again", async () => {
     stubViewport(390);
     live = await mountApp();
     const { container } = live;
 
-    expect(container.querySelector(".sheet"), "the sheet starts closed").toBeFalsy();
-    const more = [...container.querySelectorAll(".tabbtn")].find((b) => /More/.test(b.textContent));
-    await act(async () => { more.click(); });
-    await flush();
+    // Both controls exist: the ☰ in the top bar and "More" in the bottom bar.
+    expect(openers(container).length, "☰ in the top bar and More in the bottom bar").toBe(2);
 
-    const sheet = container.querySelector(".sheet");
-    expect(sheet, "tapping More opens the sheet").toBeTruthy();
-    const labels = [...sheet.querySelectorAll("button")].map((b) => (b.textContent || "").trim());
-    // Nothing may be stranded: Logout and Reset live at the foot of the sidebar on a desktop and
-    // would otherwise be unreachable on a phone entirely.
-    expect(labels.some((t) => /Logout/.test(t)), "Logout must be reachable on a phone").toBe(true);
-    expect(labels.some((t) => /Salon Settings/.test(t)), "the Other-group tabs live in the sheet").toBe(true);
-    // A tab that made the bottom bar must not be duplicated inside the sheet.
-    expect(labels.filter((t) => /^Billing \(POS\)$/.test(t)).length).toBe(0);
+    for (const opener of openers(container)) {
+      await act(async () => { opener.click(); });
+      await flush();
+      const open = drawer(container);
+      expect(open, "each control opens the drawer").toBeTruthy();
+
+      const labels = [...open.querySelectorAll("button, label")].map((b) => (b.textContent || "").trim());
+      // The whole sidebar, spelled out — not a subset. A tab on the bottom bar appears here too,
+      // because this IS the sidebar; a drawer showing a subset would be a rival navigation.
+      expect(labels.some((t) => /Billing \(POS\)/.test(t)), "the bar's own tabs are in the sidebar too").toBe(true);
+      expect(labels.some((t) => /Salon Settings/.test(t)), "and the Other-group tabs").toBe(true);
+      // Nothing may be stranded: these live at the foot of the sidebar on a desktop and would
+      // otherwise be unreachable on a phone entirely.
+      expect(labels.some((t) => /Logout/.test(t)), "Logout must be reachable on a phone").toBe(true);
+      expect(labels.some((t) => /Restore/.test(t)), "so must Restore").toBe(true);
+
+      // Same control closes it (it is a toggle, and its label flips to say so).
+      const closer = [...container.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Close menu");
+      await act(async () => { closer.click(); });
+      await flush();
+      expect(drawer(container), "and closes it again").toBeFalsy();
+    }
+  });
+
+  it("closes the drawer when a destination is picked", async () => {
+    // A nav left open over the page it just navigated to reads as a stuck menu.
+    stubViewport(390);
+    live = await mountApp();
+    const { container } = live;
+
+    await act(async () => { openers(container)[0].click(); });
+    await flush();
+    const settings = [...drawer(container).querySelectorAll("button")]
+      .find((b) => /Salon Settings/.test(b.textContent || ""));
+    await act(async () => { settings.click(); });
+    await flush();
+    expect(drawer(container), "picking a tab puts the drawer away").toBeFalsy();
   });
 
   it("keeps the desktop shell exactly as it was on a laptop", async () => {
@@ -212,10 +244,13 @@ describe("responsive — the CSS contract", () => {
     live = await mountApp();
     // index.html opts into drawing under the notch and the home indicator; without these the
     // bottom bar and the connection pill sit underneath the home bar on an iPhone.
-    for (const rule of [".tabbar", ".sheet", ".cartbar"]) {
+    for (const rule of [".tabbar", ".cartbar"]) {
       const block = new RegExp(`\\${rule}\\s*\\{[^}]*safe-area-inset-bottom`);
       expect(live.css, `${rule} must clear the home indicator`).toMatch(block);
     }
+    // The drawer runs the full height of the screen, so it pays BOTH insets — its first nav item
+    // would otherwise sit under the notch and its Logout button under the home bar.
+    expect(live.css).toMatch(/\.nav\[data-open="1"\][\s\S]{0,400}safe-area-inset-bottom/);
     expect(live.css).toContain("env(safe-area-inset-top)");
   });
 
@@ -257,27 +292,25 @@ describe("responsive — the CSS contract", () => {
     expect(app.getAttribute("style")).not.toMatch(/(^|;)\s*background\s*:/);
   });
 
-  it("gives the phone chrome an opaque ground, since it may not blur", async () => {
+  it("gives the phone bars an opaque ground, since they may not blur", async () => {
     // Also found during the device pass. --nav-bg is 72% opaque under Advanced, which only works
     // for the sidebar because the sidebar is allowed a backdrop-filter to frost what is behind
-    // it. The bars and the sheet sit over scrolling content and are barred from blurring, so at
-    // 72% the page read straight through them.
+    // it — and it keeps that as a drawer, because a drawer sits still. The two BARS lie over
+    // scrolling content and are barred from blurring, so at 72% the page read through them.
     stubViewport(1366);
     live = await mountApp();
     expect(live.css).toMatch(/\.topbar\s*\{[^}]*background:var\(--bar-bg/);
     expect(live.css).toMatch(/\.tabbar\s*\{[^}]*background:var\(--bar-bg/);
-    expect(live.css).toMatch(/\.sheet\s*\{[^}]*background:var\(--sheet-bg/);
-    // Both must be fully opaque hex under Advanced — an rgba() here is the bug coming back.
+    // Fully opaque hex under Advanced — an rgba() here is the bug coming back.
     expect(live.css).toMatch(/--bar-bg:#[0-9A-Fa-f]{6};/);
-    expect(live.css).toMatch(/--sheet-bg:#[0-9A-Fa-f]{6};/);
   });
 
   it("keeps the blur budget: no backdrop-filter added to anything that scrolls", async () => {
     stubViewport(1366);
     live = await mountApp();
-    // The budget predates this work (sidebar + modal scrim only). The new furniture — tab bar,
-    // sheet, cart bar, top bar — all appear over scrolling content, so none of them may blur.
-    for (const rule of [".tabbar", ".sheet", ".cartbar", ".topbar", ".tabbtn"]) {
+    // The budget predates this work (sidebar + modal scrim only). The mobile furniture — tab bar,
+    // cart bar, top bar — all appear over scrolling content, so none of them may blur.
+    for (const rule of [".tabbar", ".cartbar", ".topbar", ".tabbtn"]) {
       const block = new RegExp(`\\${rule}\\s*\\{[^}]*backdrop-filter`);
       expect(live.css, `${rule} must not blur`).not.toMatch(block);
     }
@@ -287,7 +320,7 @@ describe("responsive — the CSS contract", () => {
     stubViewport(1366);
     live = await mountApp();
     const print = live.css.slice(live.css.indexOf("@media print"));
-    for (const rule of [".topbar", ".tabbar", ".sheet"]) {
+    for (const rule of [".topbar", ".tabbar", ".rail-scrim"]) {
       expect(print.slice(0, 600), `${rule} must not print`).toContain(rule);
     }
   });
