@@ -60,15 +60,27 @@ self.addEventListener("fetch", (event) => {
 
   // Navigations: network-first, so a deployed change is picked up on the next load and the
   // cached shell is only ever a fallback for "there is no network".
+  //
+  // Keyed on the document's OWN url, not on the one shell constant. This worker's scope is the
+  // whole base path, so it also controls the public booking page at <base>book/ — and storing
+  // every navigation under a single key meant the last document visited won. A customer opening
+  // the booking page on the counter tablet would overwrite the app shell in the cache, and the
+  // salon's next offline start would paint the customer's booking form instead of the till.
+  // The shell stays the last-resort fallback for a url that has never been visited.
   if (req.mode === "navigate") {
+    const key = url.origin + url.pathname;
     event.respondWith(
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(INDEX, copy));
+          caches.open(CACHE).then((c) => c.put(key, copy));
           return res;
         })
-        .catch(() => caches.match(INDEX).then((hit) => hit || Response.error()))
+        .catch(() =>
+          caches.match(key).then((hit) =>
+            hit || caches.match(INDEX).then((fallback) => fallback || Response.error())
+          )
+        )
     );
     return;
   }

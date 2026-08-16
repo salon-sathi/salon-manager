@@ -33,6 +33,9 @@ function emit(base = "/salon-manager/") {
       "assets/Billing-FFF666.js": {},
       "assets/Stats-GGG777.js": {},
       "assets/pdf.worker.min-HHH888.mjs": {},
+      // The public booking page: a second HTML entry, with its own entry chunk.
+      "book/index.html": {},
+      "assets/book-III999.js": {},
     }
   );
   const sw = emitted.find((f) => f.fileName === "sw.js").source;
@@ -120,7 +123,21 @@ describe("the service worker's own rules", () => {
   });
 
   it("is network-first for the document and cache-first for hashed assets", () => {
-    expect(CODE).toMatch(/req\.mode === "navigate"[\s\S]{0,200}fetch\(req\)/);
+    expect(CODE).toMatch(/req\.mode === "navigate"[\s\S]{0,300}fetch\(req\)/);
     expect(CODE).toMatch(/caches\.match\(req\)\.then\(\(hit\) =>\s*\n?\s*hit \|\|/);
+  });
+
+  it("caches each document under its OWN url, not all of them under the shell's", () => {
+    // This worker's scope is the whole base path, so it controls the public booking page at
+    // <base>book/ as well as the app. Storing every navigation under the single INDEX key let
+    // the last document visited win: a customer booking on the counter tablet would replace the
+    // app shell in the cache, and the salon's next offline start would open the booking form.
+    //
+    // playwright.config.js sets serviceWorkers: "block", so no e2e spec can ever catch this —
+    // this assertion is the only guard there is.
+    expect(CODE).not.toMatch(/navigate[\s\S]{0,400}c\.put\(INDEX/);
+    expect(CODE).toMatch(/navigate[\s\S]{0,200}c\.put\(key/);
+    // …and INDEX survives as the fallback for a url nobody has visited yet.
+    expect(CODE).toMatch(/caches\.match\(INDEX\)/);
   });
 });
