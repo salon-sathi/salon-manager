@@ -55,6 +55,45 @@ number of ticks reliably wins: loading a module is file I/O, not a queued task. 
 every view module is *evaluated* in those suites, so a module-init error in any screen fails
 the suite the same way `app.smoke.test.jsx` catches one in the shell.
 
+## Parked sections (feature flags)
+
+[`src/lib/features.js`](src/lib/features.js) holds one flag per section the salon does not
+currently use: `finance`, `raw`, `barcode`, `alerts`, `udhari`. A `false` drops the section
+from the live UI; the view, its logic, its tests and its data stay. `lib/ui/nav.js`
+re-exports `featureOn` as `tabEnabled` — **the same function, not a copy**, which
+`features.test.js` pins.
+
+**A tab is not the feature.** `finance`/`raw`/`barcode`/`alerts` happen to be tab-only, which
+made "park it" and "hide the tab" look like the same job. **Udhari is not** — it is also a
+*payment mode on a bill*, so parking it means withdrawing every entry point:
+
+| Where | What the flag does |
+|---|---|
+| `lib/ui/nav.js` | drops the rail (`tabAllowed` → `tabEnabled`) |
+| `salon-manager.jsx` | `VIEWS.udhari` falls back to the dashboard — `tab` is state, so hiding the rail is not the control |
+| `views/Billing.jsx` | `PAY_MODES` loses "Udhari" — **this** is what stops a new credit bill existing |
+| `views/SalesHistory.jsx` | `payModesFor()` drops it from the Edit-bill select |
+| `views/Stats.jsx` | hides the outstanding card; "Credit & recovery" becomes break-even alone |
+| `views/Settings.jsx` | filters the `LOCKED_FEATURES` line that names it |
+
+**What a flag must NOT gate: the rendering of data the section already produced.** Sales
+History's "due" badge, the receipt's balance line, the Dashboard sub-note and the payment-mix
+pie are all conditional on the bill's own `payment` field — they render nothing on a salon with
+no credit bills, and on one that has them the money stays visible instead of vanishing. Gating
+those too would make a real unsettled debt *invisible* rather than merely unsettleable, and
+would turn revival from one line into six coupled edits. `lib/stats.js`, `lib/backup.js` and
+`chartkit.jsx` are untouched for the same reason — a restore must never be lossy.
+
+**Reviving one** = flip the flag. `roles.js` keeps the action (`udhari.manage`) and `nav.js`
+keeps the tab row and its phone label, so nothing else has to be re-derived. Two things to
+re-check on the way back in: `e2e/auth.spec.js`'s `RAIL` lists (the owner's `hidden` array) and
+the parked-feature block in `permissions.integration.test.jsx`, both of which assert the
+section is *gone*.
+
+`SalesHistory` carries one subtlety worth keeping: `payModesFor()` re-adds the bill's
+`origPayment` when it is outside the current list, so opening a legacy credit bill to fix a
+line does not silently convert it to UPI on save.
+
 ## The service worker
 
 Hand-rolled, ~90 lines, no Workbox and no `vite-plugin-pwa`. Its whole job is to make the app
@@ -344,6 +383,18 @@ split, so don't inline receipt markup into a caller.
 | [`src/lib/receiptImage.js`](src/lib/receiptImage.js) | HTML → JPEG. SVG `<foreignObject>` → `<img>` → canvas. No dependency. |
 | [`src/lib/receipts.js`](src/lib/receipts.js) | pure: the message, the `wa.me` link, the storage path |
 | [`src/lib/receiptStorage.js`](src/lib/receiptStorage.js) | thin Storage adapter (upload/delete) |
+
+**The receipt is the only copy that leaves the shop**, which is why the stylist's name is on it
+only behind `config.showStaffOnReceipt` (Settings → Branding & receipt, **default off**).
+Attribution itself is untouched by the switch: `staffId` is still snapshotted onto every service
+line at billing time, and `commissions.js`, Sales History and the customer's visit history all
+read it off the saved bill. So this is a *presentation* flag in a function documented as
+presentation-only — never a reason to stop writing `staffId`. `effectiveStore()` reads it with
+`=== true` rather than a truthy check, because a config saved before the switch existed has no
+such key and must come out **off**; that is also why it can't go through `pick()`, which only
+takes non-empty strings. Both halves are pinned — `receipt.test.jsx` for the two branches and the
+migration default, and `billing.spec.js` for "absent from the print frame, present in Sales
+History" as one pair.
 
 **It's a JPEG, not a PDF, and that's load-bearing.** Every built-in PDF font encodes WinAnsi,
 which has no `₹` (U+20B9) — and a Devanagari shop name needs Indic shaping on top. A PDF would

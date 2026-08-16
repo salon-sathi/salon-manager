@@ -2,6 +2,7 @@
 
 import { CAPEX_START, ChartCard, Heatmap, PAY_COLORS, STATS_PERIODS, TRADING_START, TreemapTile, breakEvenCard, compactLabel, compactLabelRight, exactLabel, exactLabelGold, periodRange, qtyLabelRight, sectionHead } from "../components/chartkit.jsx";
 import { Card, Empty, Header } from "../components/primitives.jsx";
+import { featureOn } from "../lib/features.js";
 import { avgBillTrend, breakEvenEstimate, breakEvenSeries, dailyRevenueSeries, deadStock, dormantTrend, expenseBreakdown, expenseByMonth, expenseTotal, formatINR, inrCompact, inventoryByCategory, inventoryValue, ltvDistribution, monthlyRevenueProfit, newVsReturning, noShowPct, paymentBreakdown, rebookConversion, repeatRatio, salesHeatmap, serviceVsProductRevenue, summarize, topItems as topItemsBy, topServices, udhariOutstandingSeries } from "../lib/stats.js";
 import { S } from "../lib/ui/css.js";
 import { INR, money, todayStr } from "../lib/ui/format.js";
@@ -52,6 +53,10 @@ function Stats({ sales, expenses, items, customers = [], appointments = [] }) {
   const heat = useMemo(() => salesHeatmap(pSales), [pSales]);
   const topProducts = useMemo(() => topItemsBy(pSales, { metric, limit: 15, includeConsolidated: includeMisc }), [pSales, metric, includeMisc]);
   const pay = useMemo(() => paymentBreakdown(pSales), [pSales]);
+  // The credit book. Both are computed unconditionally — they are cheap reductions over
+  // data already in memory, and keeping the hook order fixed is what lets the flag gate
+  // only the rendering. `showUdhari` is the parked-section switch (lib/features.js).
+  const showUdhari = featureOn("udhari");
   const udhariSeries = useMemo(() => udhariOutstandingSeries(sales, from, to), [sales, from, to]);
   const udhariNow = useMemo(() => money(sales.filter((s) => s.payment === "Udhari").reduce((a, s) => a + Math.max(0, (s.total || 0) - (s.paid || 0)), 0)), [sales]);
   const inv = useMemo(() => inventoryValue(items), [items]);
@@ -85,7 +90,7 @@ function Stats({ sales, expenses, items, customers = [], appointments = [] }) {
         <Card label="Trading profit" value={formatINR(sum.profit)} sub={`${sum.margin}% margin`} accent />
         <Card label="Margin" value={sum.margin + "%"} sub="profit ÷ revenue" />
         <Card label="Avg ticket" value={formatINR(sum.avgTicket)} sub="per bill" />
-        <Card label="Udhari outstanding" value={formatINR(udhariNow)} sub="unpaid credit · now" />
+        {showUdhari && <Card label="Udhari outstanding" value={formatINR(udhariNow)} sub="unpaid credit · now" />}
         <Card label="Inventory at cost" value={formatINR(inv.cost)} sub={`${inv.count} items · now`} />
         <Card label="Out of stock" value={inv.outOfStock} sub="items at zero · now" />
         <Card label="Break-even" value={beCard.value} sub={beCard.sub} />
@@ -295,20 +300,27 @@ function Stats({ sales, expenses, items, customers = [], appointments = [] }) {
             </section>
           </div>
 
-          <div style={sectionHead}>Credit & recovery</div>
-          <div className="g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <ChartCard title="Udhari outstanding over time">
-              <AreaChart data={udhariSeries} margin={{ top: 8, right: 10, left: -6, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gUdhari" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#E8A33D" stopOpacity={0.4} /><stop offset="100%" stopColor="#E8A33D" stopOpacity={0.04} /></linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EEF3EE" />
-                <XAxis dataKey="label" tick={{ fontSize: 10.5, fill: "#678" }} interval="preserveStartEnd" minTickGap={26} />
-                <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrCompact} width={48} />
-                <Tooltip formatter={(v) => [formatINR(v), "Outstanding"]} />
-                <Area type="monotone" dataKey="outstanding" name="Outstanding" stroke="#B0762A" strokeWidth={2} fill="url(#gUdhari)" />
-              </AreaChart>
-            </ChartCard>
+          {/* Two charts that read together: what the shop is owed, and what it has earned
+              back. With Udhari parked (lib/features.js) break-even stands alone, full
+              width and under its own head — one chart under a "Credit" heading reads as a
+              chart that failed to load. `.g2` is the opt-in responsive class and only
+              belongs on the two-column form. */}
+          <div style={sectionHead}>{showUdhari ? "Credit & recovery" : "Recovery"}</div>
+          <div className={showUdhari ? "g2" : undefined} style={{ display: "grid", gridTemplateColumns: showUdhari ? "1fr 1fr" : "1fr", gap: 16 }}>
+            {showUdhari && (
+              <ChartCard title="Udhari outstanding over time">
+                <AreaChart data={udhariSeries} margin={{ top: 8, right: 10, left: -6, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gUdhari" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#E8A33D" stopOpacity={0.4} /><stop offset="100%" stopColor="#E8A33D" stopOpacity={0.04} /></linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF3EE" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10.5, fill: "#678" }} interval="preserveStartEnd" minTickGap={26} />
+                  <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrCompact} width={48} />
+                  <Tooltip formatter={(v) => [formatINR(v), "Outstanding"]} />
+                  <Area type="monotone" dataKey="outstanding" name="Outstanding" stroke="#B0762A" strokeWidth={2} fill="url(#gUdhari)" />
+                </AreaChart>
+              </ChartCard>
+            )}
 
             <ChartCard title="Break-even — profit vs capital (all-time)">
               {be.series.length === 0 ? (

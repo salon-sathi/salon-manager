@@ -10,6 +10,11 @@
 //
 // Everything here mounts the whole app with Firebase mocked, so a change that satisfies
 // roles.js but forgets to thread `perms` into a component still fails.
+//
+// The last block covers the OTHER way a screen can be out of reach: a parked feature
+// (FEATURES in lib/features.js), which is not about the role at all — it is off for the
+// owner too. It sits here because it needs the same thing this file already builds: the
+// real app, mounted, with its rails read back.
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -249,6 +254,16 @@ describe("the panel itself", () => {
     );
   });
 
+  it("does not list a restriction on a parked feature", async () => {
+    // "Udhari (credit) — settling what a customer owes" is a real locked feature and would
+    // still be true; with the section parked there is no screen for the sentence to be
+    // about, and it would be the one place the word survived. See LOCKED_FEATURES.
+    live = await mountAs("owner");
+    await clickRail(live.container, "Salon Settings");
+    expect(live.container.textContent).toMatch(/Always the owner's/); // the list rendered…
+    expect(live.container.textContent).not.toMatch(/Udhari/i);        // …without this line
+  });
+
   it("does not offer to save a screen nobody has touched", async () => {
     // Opens on a shop that already has switches saved: the panel must read them back as the
     // current state, not as pending edits.
@@ -264,5 +279,45 @@ describe("the panel itself", () => {
     await act(async () => { box.click(); });
     await flush();
     expect([...live.container.querySelectorAll("button")].some((b) => b.textContent === "Save feature access")).toBe(true);
+  });
+});
+
+describe("a parked feature (FEATURES in lib/features.js)", () => {
+  // Udhari is parked, and unlike a role restriction it is off for the OWNER too. A tab is
+  // the easy half; what these pin is that its other entry points went with it, because a
+  // section reachable from the till is not parked — it is merely missing from the sidebar.
+  it("is off the owner's rail — the most privileged role there is", async () => {
+    live = await mountAs("owner");
+    const seen = await rails(live.container);
+    expect(seen).not.toContain("Udhari (Credit)");
+    expect(seen).toContain("Stats"); // the rest of the owner's rail is intact
+  });
+
+  it("offers no way to write new data for it — the till has two payment modes, not three", async () => {
+    // The tab is presentation; THIS is what stops a fresh credit bill being created while
+    // the section is off, and it is what fails if the list is ever hardcoded again.
+    //
+    // Asserted on the exported list rather than the rendered buttons: the payment row is
+    // behind a non-empty cart, so a DOM check here would be a test about ringing up a bill.
+    // The rendered form is covered by e2e/billing.spec.js, which has a real cart.
+    const { PAY_MODES } = await import("./views/Billing.jsx");
+    expect(PAY_MODES).toEqual(["UPI", "Cash"]);
+  });
+
+  it("keeps a legacy credit bill editable without silently converting it", async () => {
+    // The subtle half. Opening an old Udhari bill to fix a line must not drop it to UPI on
+    // save — that would strand whatever is still owed on it, invisibly.
+    const { payModesFor } = await import("./views/SalesHistory.jsx");
+    expect(payModesFor("UPI")).toEqual(["UPI", "Cash"]);
+    expect(payModesFor("Udhari")).toEqual(["UPI", "Cash", "Udhari"]);
+  });
+
+  it("takes its card and its chart off Stats with it", async () => {
+    live = await mountAs("owner");
+    await clickRail(live.container, "Stats");
+    expect(live.container.textContent).toMatch(/Avg ticket/); // the KPI row rendered…
+    expect(live.container.textContent).not.toMatch(/Udhari/i); // …without the credit card
+    expect(live.container.textContent).not.toMatch(/Credit & recovery/);
+    expect(live.container.textContent).toMatch(/Break-even/); // which did NOT go with it
   });
 });

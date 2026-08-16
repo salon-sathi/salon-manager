@@ -21,8 +21,10 @@ multi-service bookings, blocked-out time, overlap prevention, and **Complete →
 hands the POS the customer, services and stylist pre-filled.
 
 **Billing** — services and retail on one bill, per-line stylist attribution, barcode scanning,
-UPI / Cash / Udhari (credit), amount-encoded UPI QR, back-dating, and a 3-inch thermal receipt
-that names the stylist, the points earned and when the customer is next due.
+UPI / Cash, amount-encoded UPI QR, back-dating, and a 3-inch thermal receipt showing the points
+earned and when the customer is next due. Stylist attribution is an **internal** record — it
+drives payouts and is on every line in Sales History and the customer's visit history — and stays
+**off** the customer's copy unless the owner turns it on in Settings → Branding &amp; receipt.
 
 **Customers** — keyed by phone, created in one tap from the till. Visit history, spend, notes,
 birthdays and anniversaries, loyalty points, tiers, packages, and RFM segments (TOP / Regular /
@@ -42,7 +44,7 @@ peak-hour heatmap, no-show rates).
 **Stock** — retail *and* backbar, with batches, expiry, FIFO depletion, low-stock and expiry
 alerts, a barcode label creator, and tolerant import (txt/csv/tsv/xls/xlsx/pdf/json).
 
-**Money** — sales history (edit, split across dates, delete), the Udhari credit ledger, vendor
+**Money** — sales history (edit, split across dates, delete), vendor
 bills with proof uploads, expenses, salon analytics (service vs retail split, top services,
 repeat ratio, average bill trend, LTV distribution, new vs returning, no-show %, dormant trend,
 reminder→visit conversion), and JSON/XLSX backup & restore.
@@ -147,7 +149,6 @@ A ⚙ marks a row the owner can switch either way.
 | Barcode Creator, Data Import | ✅ | — | ✅ ⚙ |
 | Finance, Stats | ✅ | — | — |
 | Expenses, Vendor Bills | ✅ | — | — |
-| Udhari ledger | ✅ | — | — |
 | Redeem a customer's points / package at the till | ✅ | ✅ | ✅ |
 | Services, Staff, Packages, Loyalty config | ✅ | — | — |
 | Staff commissions & payout reports | ✅ | — | — |
@@ -357,6 +358,7 @@ tested data (no clock, no randomness).
 |---|---|---|
 | [`sync.js`](src/lib/sync.js) | keyed-node storage, field-level deltas, 3-way merge, role-aware slice reads | ✅ |
 | [`roles.js`](src/lib/roles.js) | the `can(role, action, permissions)` matrix, plus the envelope the owner may switch features inside | ✅ |
+| [`features.js`](src/lib/features.js) | the flags that park a whole section of the app without deleting it — see below | ✅ |
 | [`seed.js`](src/lib/seed.js) | first-run service menu, stock, staff, templates | ✅ |
 | [`customers.js`](src/lib/customers.js) | phone normalisation (the customer key) + drift-free visit/spend stats | ✅ |
 | [`salon.js`](src/lib/salon.js) | service/staff validation, commission rate resolution, bill-line types | ✅ |
@@ -375,6 +377,33 @@ tested data (no clock, no randomness).
 `dailyBills.js` and its suite are kept intact so a grocery-era backup still restores, and so
 the section could be revived without rewriting its validated mappers — but Salon Manager does
 not ship the Daily-Need Bills view. A salon's consumable purchases go through **Vendor Bills**.
+
+### Parked sections
+
+Some of what the app can do is switched **off** for this salon. Those sections are not deleted
+— they are parked behind a flag in [`features.js`](src/lib/features.js), and turning one back
+on is flipping `false` to `true`:
+
+| Flag | Section | Why it's off |
+|---|---|---|
+| `finance` | Finance | superseded by Stats |
+| `raw` | Data Import | a one-off migration tool, not a daily screen |
+| `barcode` | Barcode Creator | labels are printed elsewhere |
+| `alerts` | Alerts | low stock already surfaces on the Inventory rail |
+| `udhari` | Udhari (Credit) | the salon does not sell on credit |
+
+A parked section loses **every entry point**, not just its sidebar tab: Udhari also takes the
+third payment button off the till, the credit option out of the Edit-bill modal, and its card
+and chart off Stats — because a section you can still create data for is not parked, it is
+merely missing from the sidebar.
+
+What a flag deliberately does **not** hide is data the section already produced. An old credit
+bill still shows what is outstanding in Sales History, on its receipt and in the Dashboard's
+sub-note, because those branches read the bill's own `payment` field: on a salon that never
+sold on credit they never render at all, and on one that did, the money stays on the books
+instead of quietly disappearing. `backup.js` round-trips them either way, so a restore is
+never lossy. The trade is that while the section is off there is no screen on which to *settle*
+an old debt — if one turns up, flip the flag.
 
 Money is handled in **paise-rounded rupees** and dates in the **local timezone**, using the
 helpers the grocery app already hardened — don't reintroduce bugs those fixed.

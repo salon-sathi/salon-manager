@@ -2,6 +2,7 @@
 
 import { isValidUpiId } from "../components/receipt.jsx";
 import { DEFAULT_HOURS, parseHM, toHM } from "../lib/appointments.js";
+import { featureOn } from "../lib/features.js";
 import { ACTION_LABELS, CONFIGURABLE_ROLES, FEATURE_GROUPS, GRANTABLE, LOCKED_FEATURES, ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, can, roleDefaults, sanitizePermissions, validateUserChange } from "../lib/roles.js";
 import { LOGO_SRC, PAYMENT_QR_SRC, imageFileToDataUrl } from "../lib/ui/assets.js";
 import { ICON_STYLES, ICON_STYLE_KEYS, STORE, THEMES, THEME_KEYS, authMessage, isValidPcIp } from "../lib/ui/store.js";
@@ -27,6 +28,10 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
     name: c.name || "", tagline: c.tagline || "", address: c.address || "",
     phone: c.phone || "", pcIp: c.pcIp || "", logo: c.logo || "", paymentQr: c.paymentQr || "",
     upiId: c.upiId || "", upiName: c.upiName || "",
+    // `=== true`, matching effectiveStore(): a config saved before this switch existed has no
+    // such key and must read as off. Also keeps the draft a real boolean, so the dirty flag
+    // (a JSON compare) doesn't trip on undefined-vs-false.
+    showStaffOnReceipt: c.showStaffOnReceipt === true,
     theme: THEMES[c.theme] ? c.theme : "emerald",
     iconStyle: ICON_STYLES[c.iconStyle] ? c.iconStyle : STORE.iconStyle,
     // Working hours bound the appointment grid — a booking outside them renders off-screen.
@@ -83,6 +88,7 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
       name: draft.name.trim(), tagline: draft.tagline.trim(), address: draft.address.trim(),
       phone: draft.phone.trim(), pcIp: draft.pcIp.trim(), logo: draft.logo || "", paymentQr: draft.paymentQr || "",
       upiId: draft.upiId.trim(), upiName: draft.upiName.trim(),
+      showStaffOnReceipt: !!draft.showStaffOnReceipt,
       theme: THEMES[draft.theme] ? draft.theme : "emerald",
       iconStyle: ICON_STYLES[draft.iconStyle] ? draft.iconStyle : STORE.iconStyle,
       openTime: toHM(open), closeTime: toHM(close),
@@ -196,6 +202,21 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
           <ImageField label="Payment QR image (fallback)" keyName="paymentQr" maxDim={480} fallback={PAYMENT_QR_SRC} hint="used on receipts only when no UPI ID is set" />
           <div style={{ fontSize: 11.5, color: "var(--text-mid, #8A9C90)", marginTop: 4, lineHeight: 1.5 }}>
             Images are automatically resized and stored with your shop data, so they sync to every signed-in device. Leave a field on “default” to keep the bundled image.
+          </div>
+
+          {/* Off by default — the receipt is the only copy that leaves the shop, and who did the
+              work is kept internally regardless (Sales history, visit history, payouts). */}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 16, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={draft.showStaffOnReceipt}
+              onChange={(e) => set("showStaffOnReceipt", e.target.checked)}
+              style={{ width: 18, height: 18, cursor: "pointer", accentColor: "var(--accent, var(--brand))" }}
+            />
+            <span>Show the stylist’s name on the customer’s bill</span>
+          </label>
+          <div style={{ fontSize: 11.5, color: "var(--text-mid, #8A9C90)", marginTop: 5, lineHeight: 1.5 }}>
+            Prints <b>by &lt;name&gt;</b> under each service on the printed and WhatsApp receipt — turn it on if you want customers to know who to ask for next time. <b>Off by default.</b> Either way the stylist stays on the bill internally: Sales history, the customer’s visit history and staff payouts are unaffected.
           </div>
         </section>
       </div>
@@ -568,7 +589,10 @@ function RoleFeatures({ config, setConfig, notify, log }) {
           Always the owner's — these can't be switched on for anyone
         </div>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11.5, color: "var(--text-mid, #6B7E74)", lineHeight: 1.7 }}>
-          {LOCKED_FEATURES.map((f) => (
+          {/* A line tied to a parked feature (lib/features.js) is dropped: explaining who
+              may not reach a screen nobody can reach is noise, and it would be the one
+              place "Udhari" survived the parking. */}
+          {LOCKED_FEATURES.filter((f) => !f.feature || featureOn(f.feature)).map((f) => (
             <li key={f.what}><b>{f.what}</b> — {f.why}.</li>
           ))}
         </ul>

@@ -104,10 +104,13 @@ export function receiptHtml(sale, store = STORE, staff = [], extras = {}, { forI
         !l.misc && l.price != null && l.price !== ""
           ? `<span class="sub">@ ${INR(l.price)}${unit}</span>`
           : "";
-      // Name the stylist on the receipt. It's what the customer asks for by name next time,
-      // and it makes the bill checkable against who actually did the work.
+      // Who did the work, and ONLY if the owner asked for it (Settings → Branding & receipt;
+      // config.showStaffOnReceipt, default off). Attribution is an internal record — it drives
+      // commissions and payouts, and it is on the line in Sales history and the customer's visit
+      // history either way. This is the one copy that leaves the shop, so it is opt-in: a salon
+      // turns it on when it wants the customer to know who to ask for next time.
       const by =
-        isServiceLine(l) && l.staffId && staffById(staff, l.staffId)
+        store.showStaffOnReceipt && isServiceLine(l) && l.staffId && staffById(staff, l.staffId)
           ? `<span class="sub">by ${escapeHtml(staffName(staff, l.staffId))}</span>`
           : "";
       return `<tr><td class="col-name"><span class="nm">${escapeHtml(l.name)}</span>${sub}${by}</td><td class="col-qty">${escapeHtml(String(l.qty))}</td><td class="col-amt">${INR(l.amount)}</td></tr>`;

@@ -20,6 +20,11 @@ const STORE = {
   paymentQr: "",  // "" => default payment-qr.jpg asset; otherwise a data URL
   upiId: "",      // UPI VPA (e.g. salon@okhdfcbank). Set => bills show an amount-encoded QR; "" => static image
   upiName: "",    // payee name shown in the customer's UPI app; "" => fall back to the salon name
+  // Print "by <stylist>" under each service line on the CUSTOMER's copy. Default OFF: who did the
+  // work is an internal record (it drives commissions and payouts, and is on every line in Sales
+  // history and the customer's visit history) and the receipt is the one place that leaves the
+  // shop. A salon that wants the customer to know who to ask for next time turns it on.
+  showStaffOnReceipt: false,
   theme: "emerald", // colour theme key (see THEMES); drives the sidebar + accent palette
   iconStyle: "advanced", // "advanced" (dark glass whole-app skin) | "basic" (classic flat) — see ICON_STYLES
 };
@@ -58,6 +63,10 @@ function effectiveStore(config = {}) {
     paymentQr: pick(config.paymentQr, ""),
     upiId: pick(config.upiId, ""),
     upiName: pick(config.upiName, ""),
+    // A boolean cannot go through pick(), which only accepts a non-empty string. `=== true`
+    // rather than a truthy read: an ABSENT key — which is every shop that saved its settings
+    // before this switch existed — must come out OFF, the default.
+    showStaffOnReceipt: config.showStaffOnReceipt === true,
     theme: THEMES[config.theme] ? config.theme : STORE.theme,
     iconStyle: ICON_STYLES[config.iconStyle] ? config.iconStyle : STORE.iconStyle,
   };

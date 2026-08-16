@@ -1,22 +1,17 @@
 // The navigation map: which tabs exist, where they sit, and who may see them.
 
+import { FEATURES, featureOn } from "../features.js";
 import { can } from "../roles.js";
 
 // ---------- main app ----------
-// Feature flags for deprecating a section from the live UI WITHOUT deleting its
-// code. A tab listed here as `false` is dropped from the sidebar and its render
-// branch is skipped; the component and all its logic stay intact below. To bring
-// a section back, flip its flag to `true` (or remove the line).
-const FEATURES = {
-  finance: false, // deprecated 2026 — kept for a possible future revival
-  // Disabled by default — the code below stays intact so any of these can be revived
-  // instantly by flipping its flag to `true` (or deleting the line).
-  raw: false, // "Data Import" — hidden from the live UI; revive by setting `raw: true`
-  barcode: false, // "Barcode Creator" — hidden from the live UI; revive by setting `barcode: true`
-  alerts: false, // "Alerts" — hidden from the live UI; revive by setting `alerts: true`
-};
-// A tab is shown unless a flag explicitly turns it off.
-const tabEnabled = (k) => FEATURES[k] !== false;
+// The feature flags themselves live in lib/features.js: a tab is only ONE of a parked
+// feature's entry points (Udhari is also a payment mode at the till), and every entry
+// point has to answer the same question. Re-exported here so the nav's own callers —
+// and the tests that pin the rail — keep their single import.
+//
+// A tab whose flag is `false` is dropped from the sidebar and its render branch falls
+// back to the dashboard; the component and all its logic stay intact.
+const tabEnabled = featureOn;
 
 // Top-level sidebar destinations, plus the secondary group tucked under "Other".
 // Both feed the same `tab` switch below — grouping is purely a nav-rendering concern.
@@ -37,7 +32,7 @@ const TOP_TABS = [
   ["customers", "👤", "Customers", "customers.browse"],
   ["reminders", "🔔", "Reminders", "reminders.use"],
   ["inventory", "▦", "Inventory", "inventory.view"],
-  ["udhari", "💳", "Udhari (Credit)", "udhari.manage"],
+  ["udhari", "💳", "Udhari (Credit)", "udhari.manage"], // hidden via FEATURES.udhari; kept for a future revival
   ["expense", "⊝", "Add Expense", "expenses.manage"],
   ["finance", "∑", "Finance", "finance.view"], // hidden via FEATURES.finance; kept for a future revival
 ];
@@ -77,7 +72,7 @@ const PHONE_TAB_LABELS = {
   services: "Menu",
   inventory: "Stock",
   reminders: "Remind",
-  udhari: "Credit",
+  udhari: "Credit", // parked with FEATURES.udhari — the label waits here for the revival
   expense: "Expense",
   stats: "Stats",
 };

@@ -3,6 +3,7 @@
 import { PAY_COLORS } from "../components/chartkit.jsx";
 import { Empty, Field, Header, Modal } from "../components/primitives.jsx";
 import { findBarcodeClash, findItemByBarcode, itemBarcodes, parseBarcodeText } from "../lib/barcodes.js";
+import { featureOn } from "../lib/features.js";
 import { can } from "../lib/roles.js";
 import { isServiceLine, staffName } from "../lib/salon.js";
 import { INR, dateStr, money, todayStr, uid } from "../lib/ui/format.js";
@@ -11,6 +12,15 @@ import { STORE } from "../lib/ui/store.js";
 import { useMemo, useState } from "react";
 import { S } from "../lib/ui/css.js";
 import { SendBillActions, printReceipt, receiptExtras } from "../components/receipt.jsx";
+
+// What the Edit-bill modal offers as a payment method. "Udhari" rides FEATURES.udhari
+// (lib/features.js) and is normally absent — but a bill ALREADY on credit keeps its own
+// mode in the list, or opening a legacy credit bill to fix a line would silently convert
+// it to UPI on save and strand whatever is still owed on it.
+const payModesFor = (payment) => {
+  const base = ["UPI", "Cash", ...(featureOn("udhari") ? ["Udhari"] : [])];
+  return payment && !base.includes(payment) ? [...base, payment] : base;
+};
 
 // guardOnline is needed for one thing only: sending a bill uploads its image, and an upload
 // with no connection must raise the same "not saved — you're offline" modal every other write
@@ -91,7 +101,10 @@ function SalesHistory({ sales, items, staff, services = [], customerPackages = [
   };
 
   const openEdit = (s) => setEditing({
-    id: s.id, date: s.date, payment: s.payment || "UPI", paid: s.paid != null ? String(s.paid) : "", paidMode: s.paidMode || "Cash",
+    // `origPayment` is the mode the bill arrived with, kept separately from the editable
+    // `payment` so payModesFor() keeps offering it for the whole edit — switching a legacy
+    // credit bill to Cash must not remove the option to switch it back.
+    id: s.id, date: s.date, payment: s.payment || "UPI", origPayment: s.payment || "UPI", paid: s.paid != null ? String(s.paid) : "", paidMode: s.paidMode || "Cash",
     discount: s.discount != null ? String(s.discount) : "", // editable ₹ discount (a % discount is edited as its ₹ value)
     lines: s.lines.map((l) => ({ ...l })), orig: s.lines.map((l) => ({ ...l })),
   });
@@ -436,7 +449,7 @@ function SalesHistory({ sales, items, staff, services = [], customerPackages = [
             <Field label="Date"><input type="date" className="input" max={todayStr()} value={editing.date} onChange={(e) => setEditing({ ...editing, date: e.target.value })} /></Field>
             <Field label="Payment">
               <select className="input" value={editing.payment} onChange={(e) => setEditing({ ...editing, payment: e.target.value })}>
-                {["UPI", "Cash", "Udhari"].map((p) => <option key={p}>{p}</option>)}
+                {payModesFor(editing.origPayment).map((p) => <option key={p}>{p}</option>)}
               </select>
             </Field>
           </div>
@@ -583,5 +596,7 @@ function SalesHistory({ sales, items, staff, services = [], customerPackages = [
 }
 
 
-export { SalesHistory };
+// payModesFor is exported for the parked-feature test: the "keeps a legacy credit bill's own
+// mode" rule is the subtle half of parking Udhari, and it is behind a modal on a saved bill.
+export { SalesHistory, payModesFor };
 export default SalesHistory;

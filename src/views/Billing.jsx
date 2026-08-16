@@ -4,6 +4,7 @@ import { Empty, Header, Modal } from "../components/primitives.jsx";
 import { SendBillActions, UpiQrPreview, printReceipt, receiptExtras } from "../components/receipt.jsx";
 import { findBarcodeClash, findItemByBarcode, itemBarcodes, looksLikeBarcode, parseBarcodeText } from "../lib/barcodes.js";
 import { MQ } from "../lib/breakpoints.js";
+import { featureOn } from "../lib/features.js";
 import { loyaltyRules, maxRedeemablePoints, packageCovering, pointsBalance, pointsForSpend, redeemValueOf } from "../lib/loyalty.js";
 import { activeServices, activeStaff, isServiceLine, serviceToCartLine } from "../lib/salon.js";
 import { CATEGORY_FALLBACK, resolveIcon } from "../lib/serviceIcons.js";
@@ -20,6 +21,14 @@ import { CustomerPicker } from "../components/CustomerPicker.jsx";
 // ---------- Billing / POS ----------
 // Note: Billing reads customerPackages but never writes them. Drawing a session down IS
 // recording packageRedemptions on the bill; the shell derives usesLeft from that.
+
+// How a bill can be settled at the counter. "Udhari" is the credit option and rides
+// FEATURES.udhari (lib/features.js) — parked, it is simply not offered, which is what
+// stops NEW credit bills being written while the section is off. The `pay === "Udhari"`
+// branches further down (the part-payment box, the "owes" placeholder, the sale's `paid`
+// fields) then become unreachable and are left exactly as they are: flipping the flag
+// back has to restore a working till, not a half-wired one.
+const PAY_MODES = ["UPI", "Cash", ...(featureOn("udhari") ? ["Udhari"] : [])];
 function Billing({ items, sales, services, staff, customers, customerPackages, config, setItems, setSales, setCustomers, store = STORE, notify, log, role, perms, user, guardOnline = () => true, prefill, onPrefillUsed, onBilled }) {
   const [q, setQ] = useState("");
   // Phone-only running-total bar. The receipt pane is a screen further down once the two panes
@@ -39,7 +48,7 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
   const [cart, setCart] = useState([]); // {id, lineType, name, icon, unit, sellPrice, buyPrice, qty, staffId?}
   const [lastSale, setLastSale] = useState(null);
   const [saleDate, setSaleDate] = useState(todayStr()); // back-date a bill if needed
-  const [pay, setPay] = useState("UPI"); // UPI | Cash | Udhari
+  const [pay, setPay] = useState("UPI"); // one of PAY_MODES above
   const [customer, setCustomer] = useState("");
   const [mobile, setMobile] = useState("");
   // The picked customer's phone — the durable link from a bill to a customer record. "" is a
@@ -756,9 +765,9 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
               )}
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-mid, #6B7E74)", textTransform: "uppercase", letterSpacing: ".05em", margin: "12px 0 4px" }}>Payment</div>
               <div style={{ display: "flex", gap: 6 }}>
-                {["UPI", "Cash", "Udhari"].map((p) => (
+                {PAY_MODES.map((p) => (
                   <button key={p} className={"btn small " + (pay === p ? "primary" : "")} style={{ flex: 1 }} onClick={() => setPay(p)}>
-                    {p === "UPI" ? "UPI" : p === "Cash" ? "Cash" : "Udhari"}
+                    {p}
                   </button>
                 ))}
               </div>
@@ -856,5 +865,8 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
 }
 
 
-export { Billing };
+// PAY_MODES is exported for the parked-feature test only: the payment row renders behind a
+// non-empty cart, so a jsdom suite would have to ring up a bill to see it, and the thing
+// worth pinning is the list itself — that it is DERIVED from the flag and not hardcoded again.
+export { Billing, PAY_MODES };
 export default Billing;

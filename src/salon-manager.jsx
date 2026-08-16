@@ -800,7 +800,7 @@ function StoreManager({ user, role, onLogout }) {
     sales: () => guard("sales.view", <SalesHistory sales={sales} items={items} staff={staff} services={services} customerPackages={customerPackages} setSales={writers.sales} setItems={writers.items} store={store} notify={notify} log={addLog} role={role} perms={perms} guardOnline={guardOnline} />),
     finance: () => (tabEnabled("finance") ? guard("finance.view", <Finance sales={sales} expenses={expenses} />) : dashboard),
     stats: () => guard("stats.view", <Stats sales={sales} expenses={expenses} items={items} customers={customers} appointments={appointments} />),
-    udhari: () => guard("udhari.manage", <Udhari sales={sales} setSales={writers.sales} notify={notify} log={addLog} />),
+    udhari: () => (tabEnabled("udhari") ? guard("udhari.manage", <Udhari sales={sales} setSales={writers.sales} notify={notify} log={addLog} />) : dashboard),
     expense: () => guard("expenses.manage", <Expenses expenses={expenses} setExpenses={writers.expenses} notify={notify} log={addLog} />),
     vendorbills: () => guard("vendorBills.manage", <VendorBills bills={bills} setBills={writers.bills} setDailyBills={writers.dailyBills} online={online} notify={notify} log={addLog} />),
     logs: () => guard("logs.view", <Logs logs={logs} setLogs={writers.logs} notify={notify} />),

@@ -95,7 +95,7 @@ test.describe("the role gate refuses", () => {
 
 test.describe("what each role's rail offers", () => {
   // Straight from GRANTS in src/lib/roles.js, restricted to tabs that are not turned off by
-  // a FEATURES flag in lib/ui/nav.js. If a grant changes, these lists are meant to fail —
+  // a FEATURES flag in lib/features.js. If a grant changes, these lists are meant to fail —
   // they are the UI half of the same matrix roles.test.js checks arithmetically.
   const RAIL = {
     biller: {
@@ -112,7 +112,7 @@ test.describe("what each role's rail offers", () => {
     owner: {
       visible: ["Dashboard", "Billing (POS)", "Stats", "Inventory", "Salon Settings", "Staff"],
       // Turned off for everyone by FEATURES, owner included.
-      hidden: ["Finance", "Alerts", "Barcode Creator", "Data Import"],
+      hidden: ["Finance", "Alerts", "Barcode Creator", "Data Import", "Udhari (Credit)"],
     },
   };
 

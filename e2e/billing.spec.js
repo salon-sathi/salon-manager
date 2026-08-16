@@ -94,6 +94,21 @@ test("a service bill totals and saves", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Complete sale/ })).toHaveCount(0);
 });
 
+test("the counter offers two payment modes — Udhari is parked", async ({ page }) => {
+  // The payment row lives behind a non-empty cart, which is why the jsdom suite pins the
+  // exported PAY_MODES list instead and this is the assertion against the rendered thing.
+  // FEATURES.udhari in src/lib/features.js is what makes it two; flip that flag and this
+  // test is meant to fail, because a third button is exactly what the flip is for.
+  await openTill(page);
+  await addService(page, SERVICES.haircut);
+
+  await expect(page.getByRole("button", { name: "UPI", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cash", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Udhari/i })).toHaveCount(0);
+  // Nothing else on the till names it either — no "on credit" read-out, no "owes" placeholder.
+  await expect(page.getByText(/udhari/i)).toHaveCount(0);
+});
+
 test("a quantity bump multiplies the line", async ({ page }) => {
   await openTill(page);
   await addService(page, SERVICES.haircut);
@@ -236,8 +251,34 @@ test("printing the last bill renders the receipt into the print frame", async ({
   const receipt = page.frameLocator('iframe[aria-hidden="true"]');
   await expect(receipt.locator(".rcpt")).toBeVisible();
   await expect(receipt.getByText(SERVICES.haircut.name)).toBeVisible();
-  await expect(receipt.getByText(STAFF.asha.name)).toBeVisible();
   await expect(receipt.getByText("₹500", { exact: false }).first()).toBeVisible();
+
+  // The stylist is NOT on the customer's copy: config.showStaffOnReceipt is off by default and
+  // no spec here turns it on. toHaveCount(0) rather than not.toBeVisible() — the latter also
+  // passes when the locator resolves to nothing for an unrelated reason. The service name and
+  // total above are what stop this from passing on a receipt that rendered nothing at all.
+  await expect(receipt.getByText(STAFF.asha.name)).toHaveCount(0);
+});
+
+test("the stylist stays on the bill internally, off the customer's copy", async ({ page }) => {
+  // The other half of the assertion above. Hiding the name on the receipt is a presentation
+  // change: staffId is still snapshotted onto the line, and Sales History is where the salon
+  // reads it back. A regression that dropped the attribution from the DATA would leave the
+  // receipt spec passing and this one failing, which is exactly the split that's wanted.
+  await openTill(page);
+  await addService(page, SERVICES.haircut);
+  await page.getByRole("button", { name: /Complete sale/ }).click();
+
+  // The saved record carries the attribution regardless of what the receipt prints.
+  await expect.poll(firstSale, POLL).toMatchObject({
+    lines: [{ name: SERVICES.haircut.name, staffId: STAFF.asha.id }],
+  });
+
+  await navItem(page, "Sales History").click();
+  // Today's group is always expanded; the bill row itself collapses, so open it to reach the
+  // per-line detail. The row is a plain div with an onClick, hence the text locator.
+  await page.getByText(/· 1 item/).first().click();
+  await expect(page.getByText(STAFF.asha.name).first()).toBeVisible();
 });
 
 test("Share bill rasterizes the receipt to a real JPEG", async ({ page }) => {

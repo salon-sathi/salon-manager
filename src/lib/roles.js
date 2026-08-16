@@ -168,6 +168,11 @@ export const CONFIGURABLE_ROLES = Object.keys(GRANTABLE);
  * What the owner CANNOT delegate, and why — rendered as-is under the toggles so the
  * panel explains its own gaps instead of just being mysteriously short. Every action
  * behind these lines is absent from GRANTABLE above.
+ *
+ * An optional `feature` key names the flag in lib/features.js this line belongs to: with
+ * that feature parked there is no screen to explain, so the panel drops the line rather
+ * than listing a restriction on something the salon cannot see. This file stays free of
+ * the flag itself — the filter is applied where the list is rendered.
  */
 export const LOCKED_FEATURES = [
   {
@@ -177,6 +182,7 @@ export const LOCKED_FEATURES = [
   {
     what: "Udhari (credit) — settling what a customer owes",
     why: "recording a payment rewrites the bill it sits on, which is an owner-only write",
+    feature: "udhari",
   },
   {
     what: "Services, Staff, Packages, Loyalty rules, message templates",
