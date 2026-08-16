@@ -213,6 +213,87 @@ describe("a name and a number typed at the till", () => {
   });
 });
 
+describe("the name box checks the customer list as you type", () => {
+  const ASHA = { id: "9876500011", phone: "9876500011", name: "Asha Patil", createdAt: "2020-01-01", totalVisits: 3, totalSpend: 1200, lastVisitAt: "2026-01-01", loyaltyPoints: 0, tier: "" };
+  const OLD_BILL = { id: "sale-old", date: "2026-01-01", total: 500, payment: "Cash", customer: "Meera Joshi", mobile: "9876500022", lines: [] };
+
+  /** Focus the name field the way a user does — React listens on focusin, so send both. */
+  async function focusName(container) {
+    const el = byLabel(container, "Customer name");
+    expect(el, "no customer name field").toBeTruthy();
+    await act(async () => { el.focus(); el.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    return el;
+  }
+
+  /** The dropdown selects on mousedown, so a click's blur can't close the list first. */
+  const suggestionFor = (container, name) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent.includes(name) && !/Complete sale/.test(b.textContent));
+
+  async function chooseSuggestion(el) {
+    await act(async () => { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    await flush();
+  }
+
+  it("offers a customer already on the list, and choosing them LINKS the bill", async () => {
+    // The point of reading the database here rather than matching strings: points, packages and
+    // visit history all key off customerPhone, and typing the same letters gets none of it.
+    fx.customers = { [ASHA.phone]: ASHA };
+    live = await mountApp();
+    await clickRail(live.container, "Billing (POS)");
+    await addService(live.container);
+    await focusName(live.container);
+    await type(byLabel(live.container, "Customer name"), "asha");
+
+    const hit = suggestionFor(live.container, "Asha Patil");
+    expect(hit, "a customer on the list was not suggested").toBeTruthy();
+    expect(hit.textContent).toContain("ON FILE"); // vs a name that is only text on an old bill
+    await chooseSuggestion(hit);
+
+    await completeSale(live.container);
+
+    const sale = Object.values(slice("sales"))[0];
+    expect(sale).toMatchObject({ customerPhone: ASHA.phone, customer: "Asha Patil", total: 400 });
+    // Their curated profile is not rewritten by having been picked from a dropdown.
+    expect(slice("customers")[`${ASHA.phone}/name`]).toBeUndefined();
+  });
+
+  it("still completes a name that has only ever been text on a past bill", async () => {
+    // No record to link to, so this can only fill the two boxes — and then the ordinary capture
+    // path files them, because now there is a name AND a number.
+    fx.sales = { [OLD_BILL.id]: OLD_BILL };
+    live = await mountApp();
+    await clickRail(live.container, "Billing (POS)");
+    await addService(live.container);
+    await focusName(live.container);
+    await type(byLabel(live.container, "Customer name"), "meera");
+
+    const hit = suggestionFor(live.container, "Meera Joshi");
+    expect(hit, "a name from an old bill was not suggested").toBeTruthy();
+    expect(hit.textContent).not.toContain("ON FILE");
+    await chooseSuggestion(hit);
+
+    expect(byLabel(live.container, "Customer name").value).toBe("Meera Joshi");
+    expect(byLabel(live.container, "Customer mobile").value).toBe("9876500022");
+
+    await completeSale(live.container);
+    expect(slice("customers")["9876500022"]).toMatchObject({ id: "9876500022", name: "Meera Joshi" });
+  });
+
+  it("does not promise to add someone the salon already has", async () => {
+    // "will be added to your customer list" under a number that is already a key would be a lie,
+    // and an invitation to type a second version of the same person.
+    fx.customers = { [ASHA.phone]: ASHA };
+    live = await mountApp();
+    await clickRail(live.container, "Billing (POS)");
+    await addService(live.container);
+    await type(byLabel(live.container, "Customer name"), "Asha");
+    await type(byLabel(live.container, "Customer mobile"), ASHA.phone);
+
+    expect(live.container.textContent).toContain("Already on your customer list");
+    expect(live.container.textContent).not.toContain("will be added to your customer list");
+  });
+});
+
 describe("what must NOT become a customer", () => {
   it("leaves a true walk-in alone, and keeps the bill's old shape", async () => {
     live = await mountApp();

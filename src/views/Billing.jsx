@@ -8,7 +8,7 @@ import { MQ } from "../lib/breakpoints.js";
 import { featureOn } from "../lib/features.js";
 import { loyaltyRules, maxRedeemablePoints, packageCovering, pointsBalance, pointsForSpend, redeemValueOf } from "../lib/loyalty.js";
 import { activeServices, activeStaff, isServiceLine, serviceToCartLine } from "../lib/salon.js";
-import { captureCustomer, isValidPhone, normalizePhone } from "../lib/customers.js";
+import { captureCustomer, formatPhone, isValidPhone, normalizePhone, suggestCustomers } from "../lib/customers.js";
 import { CATEGORY_FALLBACK, resolveIcon } from "../lib/serviceIcons.js";
 import { S } from "../lib/ui/css.js";
 import { INR, money, todayStr, uid } from "../lib/ui/format.js";
@@ -84,30 +84,31 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
   useEffect(() => searchRef.current?.focus(), []);
   const showNotFound = (code) => { notFoundAt.current = Date.now(); setNotFound(code); };
 
-  // Unique past customers (name + most-recent non-empty mobile) for the name autocomplete.
-  // Sales are appended oldest→newest, so the last seen mobile per name is the most recent.
-  const knownCustomers = useMemo(() => {
-    const m = new Map();
-    sales.forEach((s) => {
-      const name = (s.customer || "").trim();
-      if (!name) return;
-      const key = name.toLowerCase();
-      const e = m.get(key) || { name, mobile: "" };
-      e.name = name; // keep latest spelling/casing
-      if ((s.mobile || "").trim()) e.mobile = s.mobile.trim();
-      m.set(key, e);
-    });
-    return [...m.values()];
-  }, [sales]);
+  // Suggestions for the currently-typed name. The customer DATABASE answers first and past-bill
+  // names fill in behind it (see suggestCustomers), so a regular is offered as the profile they
+  // already are rather than as a string that happens to match — and the desk can put the bill on
+  // them without leaving the box it is already typing in.
+  const custSuggestions = useMemo(
+    () => suggestCustomers(customers, sales, customer, 6),
+    [customers, sales, customer]
+  );
 
-  // Suggestions for the currently-typed name (substring match, excluding an exact hit).
-  const custSuggestions = useMemo(() => {
-    const q = customer.trim().toLowerCase();
-    if (!q) return [];
-    return knownCustomers
-      .filter((c) => c.name.toLowerCase().includes(q) && c.name.toLowerCase() !== q)
-      .slice(0, 6);
-  }, [customer, knownCustomers]);
+  // Choosing one. A profile LINKS the bill: the picker at the top of the cart takes over and
+  // these two boxes go away, exactly as if the customer had been picked up there. That is the
+  // point of surfacing the database here — points, packages and visit history all key off
+  // customerPhone, and a matching string does none of it. A loose past-bill name only fills the
+  // boxes; there is no record behind it to link to.
+  const pickSuggestion = (s) => {
+    setCustFocus(false);
+    if (s.customer) {
+      setCustomerPhone(s.customer.phone);
+      setCustomer("");
+      setMobile("");
+      return;
+    }
+    setCustomer(s.name);
+    if (s.phone) setMobile(s.phone);
+  };
 
   // Seed the bill from an appointment ("Complete → Bill"), exactly once.
   //
@@ -145,6 +146,14 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
   );
   // Who this bill will be attributed to, however they were identified. "" is a true walk-in.
   const billPhone = picked?.phone || typedPhone;
+
+  // Is the typed number already on the list? Then nothing is being ADDED, and saying so would be
+  // wrong twice over: phone is the key, so captureCustomer folds this bill into the record that
+  // exists rather than creating a second one.
+  const typedExisting = useMemo(
+    () => (typedPhone ? customers.find((c) => normalizePhone(c.phone) === typedPhone) || null : null),
+    [typedPhone, customers]
+  );
 
   const bookableStaff = useMemo(() => activeStaff(staff), [staff]);
 
@@ -831,11 +840,23 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
                       <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 30, background: "var(--surface, #fff)", border: "1px solid var(--border, #DDE8DE)", borderRadius: 9, marginTop: 2, boxShadow: "0 8px 24px rgba(0,0,0,.14)", overflow: "hidden" }}>
                         {custSuggestions.map((c) => (
                           // onMouseDown (not onClick) so selection fires before the input's blur closes the list.
-                          <button key={c.name} type="button"
-                            onMouseDown={(e) => { e.preventDefault(); setCustomer(c.name); if (c.mobile) setMobile(c.mobile); setCustFocus(false); }}
-                            style={{ display: "flex", justifyContent: "space-between", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid var(--border, #F0F4F0)", padding: "8px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
-                            <span style={{ fontWeight: 600 }}>{c.name}</span>
-                            <span style={{ color: "var(--text-mid, #8A9C90)" }}>{c.mobile || "—"}</span>
+                          <button key={(c.customer ? "c:" : "t:") + (c.phone || c.name)} type="button"
+                            onMouseDown={(e) => { e.preventDefault(); pickSuggestion(c); }}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid var(--border, #F0F4F0)", padding: "8px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                            <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {c.name}
+                              {/* Says which of the two rows this is — a profile the bill can be put
+                                  ON, or a name that has only ever been text on a bill. */}
+                              {c.customer && (
+                                <span style={{ background: "var(--surface-2, #EEF6F1)", color: "var(--brand)", fontWeight: 700, fontSize: 9.5, padding: "1px 5px", borderRadius: 999, marginLeft: 5, letterSpacing: ".03em" }}>
+                                  ON FILE
+                                </span>
+                              )}
+                            </span>
+                            <span style={{ color: "var(--text-mid, #8A9C90)", fontSize: 11.5, whiteSpace: "nowrap" }}>
+                              {c.phone ? formatPhone(c.phone) : "—"}
+                              {c.customer?.totalVisits ? ` · ${c.customer.totalVisits} visit${c.customer.totalVisits > 1 ? "s" : ""}` : ""}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -851,7 +872,9 @@ function Billing({ items, sales, services, staff, customers, customerPackages, c
                   are one digit short of it. */}
               {!picked && typedPhone && (
                 <div style={{ fontSize: 11.5, color: "var(--brand)", marginTop: 4 }}>
-                  ✓ {customer.trim()} will be added to your customer list.
+                  {typedExisting
+                    ? `✓ Already on your customer list — this bill goes to ${typedExisting.name || formatPhone(typedPhone)}.`
+                    : `✓ ${customer.trim()} will be added to your customer list.`}
                 </div>
               )}
               {pay === "Udhari" && (

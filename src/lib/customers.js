@@ -192,6 +192,60 @@ export function searchCustomers(customers, query, limit = 8) {
     .map((s) => s.c);
 }
 
+/**
+ * Autocomplete for the free-text name box under the cart: the customer DATABASE first, then
+ * names that have only ever been loose text on a bill.
+ *
+ * Two kinds of row, and the difference is the whole reason this isn't just a string match:
+ *   - `customer` set  → a real profile. Choosing it can LINK the bill, which typing the same
+ *     letters cannot: points, packages and visit history all key off `customerPhone`.
+ *   - `customer` null → a name seen only on past bills (a walk-in who never left a number, or
+ *     one captured before the customer list existed). Choosing it fills the two boxes, which is
+ *     all it can honestly do.
+ *
+ * A past-bill name is dropped once the database answers for that person — matched on the phone
+ * the bill carried, else on the name — so a regular is never offered twice, once linkable and
+ * once not. An exact-match loose name is dropped too: there is nothing left to complete. An
+ * exact-match PROFILE is kept, because it still offers what the typing didn't — the link.
+ */
+export function suggestCustomers(customers, sales, query, limit = 6) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [];
+
+  const profiles = searchCustomers(customers, q, limit);
+  const seenPhone = new Set(profiles.map((c) => normalizePhone(c.phone)).filter(Boolean));
+  const seenName = new Set(profiles.map((c) => String(c.name || "").trim().toLowerCase()).filter(Boolean));
+  const out = profiles.map((c) => ({
+    name: String(c.name || "").trim(),
+    phone: normalizePhone(c.phone),
+    customer: c,
+  }));
+
+  // Sales are appended oldest→newest, so the last non-empty mobile seen for a name is the
+  // most recent one the desk wrote down.
+  const loose = new Map();
+  for (const s of sales || []) {
+    const name = String(s.customer || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const e = loose.get(key) || { name, phone: "" };
+    e.name = name; // keep the latest spelling/casing
+    const m = String(s.mobile || "").trim();
+    if (m) e.phone = m;
+    loose.set(key, e);
+  }
+
+  for (const e of loose.values()) {
+    if (out.length >= limit) break;
+    const key = e.name.toLowerCase();
+    if (key === q || !key.includes(q)) continue;
+    if (seenName.has(key)) continue;
+    if (e.phone && seenPhone.has(normalizePhone(e.phone))) continue;
+    out.push({ name: e.name, phone: e.phone, customer: null });
+  }
+  return out.slice(0, limit);
+}
+
 /** dd-mm for an occasion field, from a yyyy-mm-dd date input. "" when blank. */
 export const toDayMonth = (isoDate) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ""));

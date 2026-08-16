@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizePhone, isValidPhone, formatPhone, customerKey, blankCustomer, captureCustomer,
   billsForCustomer, recomputeStats, withStats, reconcileCustomers, searchCustomers,
-  toDayMonth, fromDayMonth, isValidDayMonth,
+  suggestCustomers, toDayMonth, fromDayMonth, isValidDayMonth,
 } from "./customers.js";
 
 describe("normalizePhone", () => {
@@ -237,6 +237,69 @@ describe("searchCustomers", () => {
 
   it("copes with a missing list", () => {
     expect(searchCustomers(null, "asha")).toEqual([]);
+  });
+});
+
+describe("suggestCustomers — the till's name box", () => {
+  const DB = [
+    { phone: "9876543210", name: "Asha Patil", totalVisits: 4 },
+    { phone: "9000000001", name: "Natasha Kulkarni", totalVisits: 1 },
+  ];
+  const SALES = [
+    { id: "s1", customer: "Ashwini", mobile: "" },
+    { id: "s2", customer: "Asha Patil", mobile: "9876543210" }, // the same person as the profile
+    { id: "s3", customer: "Ashwini", mobile: "98111 22233" },   // a later bill carries her number
+  ];
+
+  it("offers the customer database first, carrying the record so the bill can be linked", () => {
+    const out = suggestCustomers(DB, SALES, "asha");
+    expect(out.slice(0, 2).map((s) => s.name)).toEqual(["Asha Patil", "Natasha Kulkarni"]);
+    expect(out[0].customer).toBe(DB[0]);
+    expect(out[0].phone).toBe("9876543210");
+  });
+
+  it("still offers a name that has only ever been text on a bill — with no record behind it", () => {
+    // A walk-in from before the customer list existed. There is nothing to link to, and saying
+    // so is the point: choosing it can only fill the boxes.
+    const loose = suggestCustomers(DB, SALES, "ash").find((s) => s.name === "Ashwini");
+    expect(loose).toMatchObject({ name: "Ashwini", customer: null });
+    expect(loose.phone).toBe("98111 22233"); // the most recent number the desk wrote down
+  });
+
+  it("never offers the same person twice, once linkable and once not", () => {
+    // "Asha Patil" is both a profile and the name on bill s2. Two rows spelled identically, one
+    // of which quietly does less, is how a desk ends up with an unlinked bill for a regular.
+    const names = suggestCustomers(DB, SALES, "asha").map((s) => s.name);
+    expect(names.filter((n) => n === "Asha Patil")).toHaveLength(1);
+  });
+
+  it("drops a loose name matched to a profile by PHONE, whatever the bill called them", () => {
+    const sales = [{ id: "s9", customer: "asha p", mobile: "+91 98765 43210" }];
+    const out = suggestCustomers(DB, sales, "asha");
+    expect(out.map((s) => s.name)).not.toContain("asha p");
+    expect(out.filter((s) => !s.customer)).toEqual([]);
+  });
+
+  it("keeps an exactly-typed PROFILE but drops an exactly-typed loose name", () => {
+    // Typing the full name is not the same as putting the bill on the customer — the profile row
+    // is the only thing that offers the link. A loose name has nothing left to complete.
+    expect(suggestCustomers(DB, SALES, "Asha Patil").map((s) => s.name)).toContain("Asha Patil");
+    expect(suggestCustomers([], SALES, "Ashwini")).toEqual([]);
+  });
+
+  it("returns nothing for a blank query rather than the whole database", () => {
+    ["", "   ", null, undefined].forEach((q) => expect(suggestCustomers(DB, SALES, q)).toEqual([]));
+  });
+
+  it("respects the limit across both sources", () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ id: `x${i}`, customer: `Ashx ${i}`, mobile: "" }));
+    expect(suggestCustomers(DB, many, "ash", 4)).toHaveLength(4);
+  });
+
+  it("copes with a missing list on either side", () => {
+    expect(suggestCustomers(null, null, "asha")).toEqual([]);
+    expect(suggestCustomers(DB, null, "asha").map((s) => s.name)).toEqual(["Asha Patil", "Natasha Kulkarni"]);
+    expect(suggestCustomers(null, SALES, "ashw").map((s) => s.name)).toEqual(["Ashwini"]);
   });
 });
 
