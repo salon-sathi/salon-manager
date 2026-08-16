@@ -14,7 +14,7 @@ import { reconcileLoyalty, reconcilePackages } from "./lib/loyalty.js";
 import { ROLE_LABELS, can, isBootstrap, resolveRole, sanitizePermissions } from "./lib/roles.js";
 import { activeStaff, serviceToCartLine } from "./lib/salon.js";
 import { toClock } from "./lib/appointments.js";
-import { assignForImport, bookingSettings, buildChairs, buildProfile, buildPublicServices, buildSlotStubs, deviceTimeZone, hoursFromConfig, importedAppointment, slotStubDiff, splitInbox } from "./lib/booking.js";
+import { assignForImport, bookingSettings, buildChairs, buildProfile, buildPublicServices, buildSlotStubs, deviceTimeZone, hoursFromConfig, importedAppointment, slotStubDiff, splitInbox, timeZoneFor } from "./lib/booking.js";
 import { clearInboxEntries, importBooking, stamp, subscribeInbox, subscribePublicSlots, writePublicChairs, writePublicProfile, writePublicServices, writeSlotUpdates } from "./lib/publicSync.js";
 import { SLICES, buildSliceUpdate, isLegacyShape, mapToArray, mergeRemote, overwriteSlice, readUsersOnce, readableSlices, subscribeConfig, subscribeConnection, subscribeOwnUser, subscribeSlice, toMap, writeConfig, writeSlice, writeUser } from "./lib/sync.js";
 import { LOGO_SRC } from "./lib/ui/assets.js";
@@ -662,7 +662,13 @@ function StoreManager({ user, role, onLogout }) {
     if (!loaded || !configSynced.current || role !== "owner") return;
     if (!synced.current.services || !synced.current.staff) return;
     const t = setTimeout(() => {
-      const profile = buildProfile(store, config, { updatedAt: todayStr(), timeZone: deviceTimeZone() });
+      // The SALON's zone from Settings, not this device's — a laptop with its clock set to
+      // another country would otherwise publish that country's idea of "today" to every
+      // customer. The device is only the fallback for a shop that has not set one yet.
+      const profile = buildProfile(store, config, {
+        updatedAt: todayStr(),
+        timeZone: timeZoneFor(config, deviceTimeZone()),
+      });
       const pubServices = buildPublicServices(services);
       const chairs = buildChairs(staff);
       // updatedAt is excluded from the drift check: it changes at midnight and would otherwise
@@ -709,7 +715,7 @@ function StoreManager({ user, role, onLogout }) {
     const { toImport, toClear } = splitInbox(inbox, appointments);
     if (!toImport.length && !toClear.length) return;
     const hours = hoursFromConfig(config);
-    const timeZone = deviceTimeZone();
+    const timeZone = timeZoneFor(config, deviceTimeZone());
     const chairIds = activeStaff(staff).map((s) => s.id);
     if (toClear.length) clearInboxEntries(toClear).catch((e) => console.error("inbox cleanup failed", e));
     if (!chairIds.length) return; // no stylists yet: leave the bookings queued rather than lose them

@@ -9,7 +9,7 @@ import { ICON_STYLES, ICON_STYLE_KEYS, STORE, THEMES, THEME_KEYS, authMessage, i
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { S } from "../lib/ui/css.js";
 import { loyaltyRules } from "../lib/loyalty.js";
-import { MAX_HORIZON_DAYS, bookingSettings, isSafeHttpUrl, mapsUrlFor } from "../lib/booking.js";
+import { MAX_HORIZON_DAYS, bookingSettings, deviceTimeZone, isSafeHttpUrl, mapsUrlFor } from "../lib/booking.js";
 import { INR, money, todayStr } from "../lib/ui/format.js";
 import { OTHER_TABS, TOP_TABS, tabAllowed, tabEnabled } from "../lib/ui/nav.js";
 import { subscribeUsers, updateUser, writeUser } from "../lib/sync.js";
@@ -351,9 +351,22 @@ function OnlineBooking({ config, setConfig, notify, log }) {
     capacity: String(current.capacity),
     leadMinutes: String(current.leadMinutes),
     horizonDays: String(current.horizonDays),
+    slotMinutes: String(current.slotMinutes),
+    timeZone: current.timeZone || deviceTimeZone(),
     noticeText: current.noticeText,
   }));
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+
+  // Every zone this browser knows, so the salon's own can be picked rather than typed. Older
+  // engines have no supportedValuesOf; falling back to whatever is currently set keeps the
+  // control usable rather than empty.
+  const zones = useMemo(() => {
+    let all = [];
+    try { all = Intl.supportedValuesOf("timeZone") || []; } catch { all = []; }
+    const here = deviceTimeZone();
+    const set = new Set([...all, here, draft.timeZone].filter(Boolean));
+    return [...set].sort();
+  }, [draft.timeZone]);
 
   // Whatever host this app is being served from, plus the booking page's own path. Derived
   // rather than typed, so it is right on GitHub Pages, on a preview build and in dev without
@@ -367,16 +380,22 @@ function OnlineBooking({ config, setConfig, notify, log }) {
     const capacity = Number(draft.capacity);
     const leadMinutes = Number(draft.leadMinutes);
     const horizonDays = Number(draft.horizonDays);
-    if (![capacity, leadMinutes, horizonDays].every((x) => Number.isFinite(x) && x >= 0)) {
+    const slotMinutes = Number(draft.slotMinutes);
+    if (![capacity, leadMinutes, horizonDays, slotMinutes].every((x) => Number.isFinite(x) && x >= 0)) {
       return notify("⚠ Every number here must be a number, and none can be negative.");
     }
     if (capacity < 1) return notify("⚠ At least 1 customer at a time, or the link can never book anything.");
     if (horizonDays < 1) return notify("⚠ The booking window has to be at least 1 day.");
     if (horizonDays > MAX_HORIZON_DAYS) return notify(`⚠ Customers can book at most ${MAX_HORIZON_DAYS} days ahead.`);
+    if (slotMinutes < 5) return notify("⚠ An appointment needs a length — 30 minutes is a sensible default.");
+    // A wrong timezone does not degrade gracefully: the booking page derives "today" and the
+    // notice cutoff from it, so it would offer the wrong DAY.
+    if (!draft.timeZone.trim()) return notify("⚠ Pick the timezone your salon is in.");
     setConfig((c) => ({
       ...c,
       onlineBooking: {
-        enabled: draft.enabled, capacity, leadMinutes, horizonDays,
+        enabled: draft.enabled, capacity, leadMinutes, horizonDays, slotMinutes,
+        timeZone: draft.timeZone.trim(),
         noticeText: draft.noticeText.trim().slice(0, 200),
       },
     }));
@@ -419,12 +438,28 @@ function OnlineBooking({ config, setConfig, notify, log }) {
             <Field label="Notice needed (minutes)"><input className="input" inputMode="numeric" value={draft.leadMinutes} onChange={(e) => set("leadMinutes", e.target.value)} /></Field>
             <Field label="Can book this far ahead (days)"><input className="input" inputMode="numeric" value={draft.horizonDays} onChange={(e) => set("horizonDays", e.target.value)} /></Field>
           </div>
+          <div className="g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Field label="Time set aside per booking (minutes)">
+              <input className="input" inputMode="numeric" value={draft.slotMinutes} onChange={(e) => set("slotMinutes", e.target.value)} />
+            </Field>
+            <Field label="Your salon's timezone">
+              <select className="input" value={draft.timeZone} onChange={(e) => set("timeZone", e.target.value)}>
+                {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+              </select>
+            </Field>
+          </div>
           <div style={{ fontSize: 11.5, color: "var(--text-mid, #8A9C90)", marginTop: -4, marginBottom: 12, lineHeight: 1.6 }}>
             <b>Customers at a time</b> is how many people you can have in the salon at once — a
             booking that would put one more than this in the chair at any minute is refused. It
             also can't book a stylist who is already busy, so whichever runs out first wins.
             Opening and closing times come from <b>Working hours</b> above; to close a whole day,
             block every stylist out for it in the diary and the link will offer nothing.
+            <br />
+            Customers aren't asked which services they want — the link is four fields and a tap —
+            so every online booking is held for the <b>time set aside</b> above, and the desk adds
+            the services when they arrive. <b>Timezone</b> decides what “today” means on the
+            booking page; get it wrong and it offers customers the wrong day, so it is set here
+            rather than read off whichever device you happen to be signed in on.
           </div>
           <Field label="A line for the customer (optional)">
             <input className="input" value={draft.noticeText} maxLength={200} placeholder="e.g. Please arrive 5 minutes early" onChange={(e) => set("noticeText", e.target.value)} />

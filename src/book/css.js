@@ -84,27 +84,6 @@ export const CSS = `
 .bk-big { font-size: 20px; font-weight: 800; margin: 6px 0; }
 .bk-err { color: var(--bk-err); font-size: 13px; font-weight: 600; margin: 10px 0; }
 
-/* ---- services ---- */
-.bk-group { margin-bottom: 12px; }
-.bk-group h3 {
-  font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--bk-mid); margin-bottom: 6px;
-}
-.bk-svc {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 12px; margin-bottom: 6px;
-  border: 1.5px solid var(--bk-line); border-radius: 10px;
-  cursor: pointer; min-height: 48px;
-}
-.bk-svc.on { border-color: var(--brand, #1B5E43); background: color-mix(in srgb, var(--brand, #1B5E43) 7%, transparent); }
-.bk-svc input { width: 19px; height: 19px; flex-shrink: 0; accent-color: var(--brand, #1B5E43); }
-.bk-svc-name { flex: 1; font-size: 14.5px; }
-.bk-svc-min { font-size: 12.5px; color: var(--bk-mid); }
-.bk-svc-rs { font-size: 13.5px; font-weight: 700; min-width: 62px; text-align: right; }
-.bk-total {
-  border-top: 1px solid var(--bk-line); padding-top: 10px; margin-top: 4px; font-size: 14px;
-}
-
 /* ---- days & times ---- */
 /* The day strip scrolls sideways inside itself; the PAGE must never scroll horizontally. */
 .bk-days { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px; }

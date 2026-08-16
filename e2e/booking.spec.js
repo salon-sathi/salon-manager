@@ -49,20 +49,15 @@ const PROFILE = {
   // asserting the clock rather than the feature.
   leadMinutes: 0,
   horizonDays: 7,
+  slotMinutes: 30,
   noticeText: "Please arrive 5 minutes early",
 };
-
-const publicServices = () =>
-  Object.fromEntries(
-    Object.values(SERVICES).map((s) => [s.id, { name: s.name, category: s.category, durationMin: s.durationMin, price: s.price }])
-  );
 
 const publicChairs = () => Object.fromEntries(Object.values(STAFF).map((s) => [s.id, true]));
 
 async function publishProjection(overrides = {}) {
   await Promise.all([
     seed("shop/public/profile", { ...PROFILE, ...overrides }),
-    seed("shop/public/services", publicServices()),
     seed("shop/public/chairs", publicChairs()),
   ]);
 }
@@ -87,8 +82,7 @@ async function customer(browser) {
 const times = (page) => page.getByRole("group", { name: "Choose a time" }).getByRole("button");
 
 /** Fill the whole form and confirm. Returns the time chosen. */
-async function book(page, { service = SERVICES.haircut.name, name = "E2E Riya", phone = "9876500055", at } = {}) {
-  await page.getByRole("checkbox", { name: new RegExp(`^${service}`) }).check();
+async function book(page, { name = "E2E Riya", phone = "9876500055", at } = {}) {
   const slot = at ? times(page).filter({ hasText: at }) : times(page).first();
   const label = (await slot.textContent()).trim();
   await slot.click();
@@ -177,7 +171,7 @@ test.describe("booking", () => {
       source: "online",
       customerName: "E2E Riya",
       customerPhone: "9876500055",
-      durationMin: SERVICES.haircut.durationMin,
+      durationMin: PROFILE.slotMinutes,
       billId: "",
     });
     // A chair the salon actually has — chosen by the app, never by the customer.
@@ -205,7 +199,6 @@ test.describe("booking", () => {
     await seed("shop/public/chairs", { "chair-0": true, "chair-1": true, "chair-2": true });
 
     const { context, page } = await customer(browser);
-    await page.getByRole("checkbox", { name: new RegExp(`^${SERVICES.haircut.name}`) }).check();
 
     const labels = await times(page).allTextContents();
     expect(labels).not.toContain("10:00 am");
@@ -216,7 +209,6 @@ test.describe("booking", () => {
 
   test("a customer cannot book when the salon has switched the link off, even mid-session", async ({ browser }) => {
     const { context, page } = await customer(browser);
-    await page.getByRole("checkbox", { name: new RegExp(`^${SERVICES.haircut.name}`) }).check();
     await times(page).first().click();
     await page.getByLabel("Your name").fill("E2E Latecomer");
     await page.getByLabel("Mobile number").fill("9876500077");

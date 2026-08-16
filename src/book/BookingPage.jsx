@@ -8,14 +8,13 @@
 // Imports only from src/lib/* and src/book/*. Never the shell, never a view: this bundle is
 // downloaded by customers on phones, and dragging the till in would cost them the whole app.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   bookableSlots, buildInboxEntry, buildInboxStub, canBook, dateInZone, isSafeHttpUrl,
-  minutesInZone, occupancyForDate, publicServiceList, slotWindow, summarizePublic,
-  validateBookingForm,
+  minutesInZone, occupancyForDate, slotWindow, validateBookingForm,
 } from "../lib/booking.js";
-import { toClock } from "../lib/appointments.js";
-import { INR, uid } from "../lib/ui/format.js";
+import { SLOT_MIN, toClock } from "../lib/appointments.js";
+import { uid } from "../lib/ui/format.js";
 import { themeVars } from "../lib/ui/store.js";
 import { readSlots, sendBooking, stamp, watchPublic } from "./db.js";
 import { CSS } from "./css.js";
@@ -27,30 +26,17 @@ function dayLabel(date) {
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
-const groupByCategory = (list) => {
-  const out = [];
-  for (const s of list) {
-    const last = out[out.length - 1];
-    if (last && last.category === s.category) last.items.push(s);
-    else out.push({ category: s.category || "Services", items: [s] });
-  }
-  return out;
-};
-
 export default function BookingPage() {
   // undefined = still reading, null = nothing published (the salon has never switched this on)
   const [profile, setProfile] = useState(undefined);
-  const [services, setServices] = useState({});
   const [chairs, setChairs] = useState({});
   const [slots, setSlots] = useState({});
   const [loadError, setLoadError] = useState("");
 
-  const [serviceIds, setServiceIds] = useState([]);
   const [date, setDate] = useState("");
   const [startMin, setStartMin] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [note, setNote] = useState("");
   const [err, setErr] = useState("");
   const [sending, setSending] = useState(false);
   const [done, setDone] = useState(null);
@@ -69,9 +55,10 @@ export default function BookingPage() {
       setLoadError("Couldn't reach the salon just now. Please check your connection and try again.");
       setProfile((p) => (p === undefined ? null : p));
     };
+    // No services subscription: the customer is never asked which ones they want, so the menu
+    // — eighty-odd records on a real salon — is not downloaded to their phone at all.
     const unsubs = [
       watchPublic("profile", (v) => setProfile(v || null), fail("profile")),
-      watchPublic("services", (v) => setServices(v || {}), fail("services")),
       watchPublic("chairs", (v) => setChairs(v || {}), fail("chairs")),
       watchPublic("slots", (v) => setSlots(v || {}), fail("slots")),
     ];
@@ -90,8 +77,9 @@ export default function BookingPage() {
     [today, profile?.horizonDays]
   );
   const chairIds = useMemo(() => Object.keys(chairs || {}), [chairs]);
-  const menu = useMemo(() => publicServiceList(services), [services]);
-  const summary = useMemo(() => summarizePublic(serviceIds, services), [serviceIds, services]);
+  // One length for every online booking, set by the owner. There is nothing to derive it from
+  // when the customer isn't choosing services, and guessing per booking would be worse.
+  const durationMin = Math.max(SLOT_MIN, Number(profile?.slotMinutes) || 30);
 
   // Keep the chosen day inside the window the salon actually offers. This is a re-seed, not
   // just a default: a page left open past midnight would otherwise still be pointing at
@@ -101,16 +89,16 @@ export default function BookingPage() {
   }, [days, date]);
 
   const options = useMemo(() => {
-    if (!open || !date || !summary.durationMin) return [];
+    if (!open || !date) return [];
     return bookableSlots(occupancyForDate(slots, date), chairIds, {
       openMin: profile.openMin,
       closeMin: profile.closeMin,
-      durationMin: summary.durationMin,
+      durationMin,
       capacity: profile.capacity,
       // Only today is bounded by the notice period; a later day is open from opening time.
       minStartMin: date === today ? minutesInZone(nowMs, timeZone) + (profile.leadMinutes || 0) : -Infinity,
     });
-  }, [open, date, today, nowMs, timeZone, slots, chairIds, summary.durationMin, profile]);
+  }, [open, date, today, nowMs, timeZone, slots, chairIds, durationMin, profile]);
 
   // A chosen time that stops being available — because somebody else booked it, or because the
   // notice window rolled past it — has to let go of itself, or Confirm would send a slot the
@@ -119,15 +107,9 @@ export default function BookingPage() {
     if (startMin != null && !options.some((o) => o.startMin === startMin)) setStartMin(null);
   }, [options, startMin]);
 
-  const toggleService = useCallback((id) => {
-    setErr("");
-    setStartMin(null); // a different basket is a different length, so the grid changes under it
-    setServiceIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
-  }, []);
-
   const submit = async () => {
     setErr("");
-    const form = { serviceIds, date, startMin, name, phone, note };
+    const form = { date, startMin, name, phone };
     const problem = validateBookingForm(form);
     if (problem) return setErr(problem);
 
@@ -141,14 +123,14 @@ export default function BookingPage() {
       setSlots(fresh);
       const verdict = canBook(
         occupancyForDate(fresh, date), chairIds,
-        { startMin, durationMin: summary.durationMin }, profile.capacity, id
+        { startMin, durationMin }, profile.capacity, id
       );
       if (!verdict.ok) {
         setStartMin(null);
         setErr("Sorry — that time has just been taken. Please pick another.");
         return;
       }
-      const entry = buildInboxEntry(form, { id, durationMin: summary.durationMin, stamp: stamp() });
+      const entry = buildInboxEntry(form, { id, durationMin, stamp: stamp() });
       await sendBooking(entry, buildInboxStub(entry, stamp()));
       setDone(entry);
     } catch (e) {
@@ -202,7 +184,6 @@ export default function BookingPage() {
           <div className="bk-tick" aria-hidden="true">✓</div>
           <h2>You're booked</h2>
           <p className="bk-big">{dayLabel(done.date)} at {toClock(done.startMin)}</p>
-          <p>{summary.names.join(", ")} · {summary.durationMin} min</p>
           <p className="bk-fine">
             Booked for <b>{done.customerName}</b> on {done.customerPhone}. The salon can see it
             already — they'll call if anything needs changing. To cancel or move it, give them a ring.
@@ -238,33 +219,7 @@ export default function BookingPage() {
       {profile.noticeText && <p className="bk-notice">{profile.noticeText}</p>}
 
       <section className="bk-card">
-        {step(1, "What would you like?", "Pick one or more — we'll work out how long it takes.")}
-        {menu.length === 0 ? (
-          <p className="bk-fine">The salon hasn't published its menu yet. Please give them a call.</p>
-        ) : (
-          groupByCategory(menu).map((group) => (
-            <div key={group.category} className="bk-group">
-              <h3>{group.category}</h3>
-              {group.items.map((s) => (
-                <label key={s.id} className={"bk-svc" + (serviceIds.includes(s.id) ? " on" : "")}>
-                  <input type="checkbox" checked={serviceIds.includes(s.id)} onChange={() => toggleService(s.id)} />
-                  <span className="bk-svc-name">{s.name}</span>
-                  <span className="bk-svc-min">{s.durationMin} min</span>
-                  <span className="bk-svc-rs">{INR(s.price)}</span>
-                </label>
-              ))}
-            </div>
-          ))
-        )}
-        {summary.durationMin > 0 && (
-          <p className="bk-total">
-            {summary.names.length} selected · <b>{summary.durationMin} min</b> · <b>{INR(summary.price)}</b>
-          </p>
-        )}
-      </section>
-
-      <section className="bk-card">
-        {step(2, "When suits you?")}
+        {step(1, "When suits you?")}
         <div className="bk-days" role="group" aria-label="Choose a day">
           {days.map((d) => (
             <button
@@ -276,12 +231,9 @@ export default function BookingPage() {
           ))}
         </div>
 
-        {!summary.durationMin ? (
-          <p className="bk-fine">Choose a service above and the available times will appear here.</p>
-        ) : options.length === 0 ? (
+        {options.length === 0 ? (
           <p className="bk-fine">
-            Nothing free on {date === today ? "today" : dayLabel(date)} for {summary.durationMin} minutes.
-            Try another day, or fewer services.
+            Nothing free on {date === today ? "today" : dayLabel(date)}. Please try another day.
           </p>
         ) : (
           <div className="bk-times" role="group" aria-label="Choose a time">
@@ -299,7 +251,7 @@ export default function BookingPage() {
       </section>
 
       <section className="bk-card">
-        {step(3, "Who shall we book it for?")}
+        {step(2, "Your details")}
         <label className="bk-field">
           <span>Your name</span>
           <input value={name} maxLength={60} autoComplete="name" onChange={(e) => { setName(e.target.value); setErr(""); }} />
@@ -308,14 +260,10 @@ export default function BookingPage() {
           <span>Mobile number</span>
           <input value={phone} type="tel" inputMode="numeric" autoComplete="tel" placeholder="10-digit mobile" onChange={(e) => { setPhone(e.target.value); setErr(""); }} />
         </label>
-        <label className="bk-field">
-          <span>Anything we should know? (optional)</span>
-          <input value={note} maxLength={200} onChange={(e) => { setNote(e.target.value); setErr(""); }} />
-        </label>
 
-        {startMin != null && summary.durationMin > 0 && (
+        {startMin != null && (
           <p className="bk-confirm-line">
-            {summary.names.join(", ")} · <b>{dayLabel(date)}</b> at <b>{toClock(startMin)}</b>
+            <b>{date === today ? "Today" : dayLabel(date)}</b> at <b>{toClock(startMin)}</b>
           </p>
         )}
         {err && <p className="bk-err" role="alert">{err}</p>}

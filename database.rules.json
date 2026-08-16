@@ -183,22 +183,18 @@
 
           // A delete writes null, and .validate never runs on a node being
           // removed — hence the guard, same idiom as sales and customers above.
-          ".validate": "!newData.exists() || (newData.hasChildren(['id', 'date', 'startMin', 'durationMin', 'serviceIds', 'customerName', 'customerPhone', 'createdAtMs']) && newData.child('id').val() === $id)",
+          // Four fields and a server stamp. The customer is never asked which services they
+          // want — the link exists to be answered in a few taps — so serviceIds is absent here
+          // and the desk fills it in on the appointment before it bills.
+          ".validate": "!newData.exists() || (newData.hasChildren(['id', 'date', 'startMin', 'durationMin', 'customerName', 'customerPhone', 'createdAtMs']) && newData.child('id').val() === $id)",
 
           "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40" },
           "date": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "startMin": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
           "durationMin": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= 480" },
-          // RTDB stores an empty array as null, so the key vanishes and the
-          // hasChildren above already refuses it. $i caps the basket at ten.
-          "serviceIds": {
-            ".validate": "newData.hasChildren()",
-            "$i": { ".validate": "$i.matches(/^\\d$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 40" }
-          },
           "customerName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60" },
           // The same shape customers.js enforces at the counter (isValidPhone).
           "customerPhone": { ".validate": "newData.isString() && newData.val().matches(/^[6-9]\\d{9}$/)" },
-          "note": { ".validate": "newData.isString() && newData.val().length <= 200" },
           // ServerValue.TIMESTAMP, pinned. NOT Date.now(): a budget phone ten
           // minutes out of step would fail any tolerance window and lose the
           // booking, and a far-future value would make its slot stub unprunable.

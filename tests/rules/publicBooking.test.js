@@ -35,10 +35,8 @@ const booking = (over = {}) => ({
   date: DATE,
   startMin: 600,
   durationMin: 45,
-  serviceIds: ["svc-cut"],
   customerName: "Riya Sharma",
   customerPhone: "9876500001",
-  note: "first visit",
   createdAtMs: serverTimestamp(),
   ...over,
 });
@@ -204,7 +202,7 @@ describe("the shape of a booking is not negotiable", () => {
 
   it("requires every field it validates", async () => {
     await enableOnlineBooking();
-    for (const key of ["id", "date", "startMin", "durationMin", "serviceIds", "customerName", "customerPhone", "createdAtMs"]) {
+    for (const key of ["id", "date", "startMin", "durationMin", "customerName", "customerPhone", "createdAtMs"]) {
       await assertFails(set(ref(asUnauth(), `shop/publicBookings/${BOOKING_ID}`), without(booking(), key)));
     }
   });
@@ -238,20 +236,16 @@ describe("the shape of a booking is not negotiable", () => {
     await rejects({ customerPhone: 9876500001 });
   });
 
-  it("insists on a name, and caps the free text", async () => {
+  it("insists on a name, and caps it", async () => {
     await enableOnlineBooking();
     await rejects({ customerName: "" });
     await rejects({ customerName: "x".repeat(61) });
-    await rejects({ note: "x".repeat(201) });
   });
 
-  it("insists on at least one service and caps the basket", async () => {
+  it("refuses a services list — the customer is never asked, so one is not theirs to send", async () => {
     await enableOnlineBooking();
-    // RTDB stores an empty array as null, so the key vanishes and hasChildren refuses it.
-    await rejects({ serviceIds: [] });
-    await rejects({ serviceIds: Array.from({ length: 11 }, (_, i) => `svc-${i}`) });
-    await rejects({ serviceIds: ["x".repeat(41)] });
-    await rejects({ serviceIds: [123] });
+    await rejects({ serviceIds: ["svc-cut"] });
+    await rejects({ note: "anything at all" });
   });
 
   it("refuses any field it does not know about", async () => {
@@ -310,7 +304,7 @@ describe("staff still own the inbox and the projection", () => {
       update(ref(asBiller()), {
         [`shop/appointments/${BOOKING_ID}`]: {
           id: BOOKING_ID, date: DATE, staffId: "staff-1", startMin: 600, durationMin: 45,
-          serviceIds: ["svc-cut"], customerPhone: "9876500001", customerName: "Riya Sharma",
+          serviceIds: [], customerPhone: "9876500001", customerName: "Riya Sharma",
           status: "booked", note: "", billId: "", source: "online", createdAt: DATE,
         },
         [`shop/publicBookings/${BOOKING_ID}`]: null,

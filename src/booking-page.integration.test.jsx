@@ -39,13 +39,8 @@ const PROFILE = {
   name: "Glow Salon", tagline: "Hair · Skin · Nails", address: "12 MG Road, Pune",
   phone: "+91 98765 43210", mapsUrl: "https://maps.app.goo.gl/glow", theme: "emerald",
   timeZone: "Asia/Kolkata", openMin: 600, closeMin: 1260,
-  enabled: true, capacity: 3, leadMinutes: 60, horizonDays: 7,
+  enabled: true, capacity: 3, leadMinutes: 60, horizonDays: 7, slotMinutes: 30,
   noticeText: "Please arrive 5 minutes early",
-};
-
-const SERVICES = {
-  "svc-cut": { name: "Haircut", category: "Hair", durationMin: 30, price: 300 },
-  "svc-facial": { name: "Facial", category: "Skin", durationMin: 60, price: 900 },
 };
 
 const CHAIRS = { "staff-1": true, "staff-2": true, "staff-3": true };
@@ -69,11 +64,10 @@ function mount() {
 }
 
 /** Push the published projection in, as the live subscriptions would. */
-function publish({ profile = PROFILE, services = SERVICES, chairs = CHAIRS, slots = {} } = {}) {
+function publish({ profile = PROFILE, chairs = CHAIRS, slots = {} } = {}) {
   slotsNow = slots;
   act(() => {
     listeners.profile?.(profile);
-    listeners.services?.(services);
     listeners.chairs?.(chairs);
     listeners.slots?.(slots);
   });
@@ -95,7 +89,13 @@ afterEach(() => {
 });
 
 // ---- accessible-route helpers: labels and text, never a testid --------------------------
-const text = (c) => c.textContent;
+// The page carries its stylesheet in an inline <style>, whose contents land in textContent —
+// so a naive read matches CSS class names and comments as if they were words on the page.
+const text = (c) => {
+  const clone = c.cloneNode(true);
+  clone.querySelectorAll("style").forEach((n) => n.remove());
+  return clone.textContent;
+};
 const buttons = (c) => [...c.querySelectorAll("button")];
 const btn = (c, re) => buttons(c).find((b) => re.test(b.textContent));
 const link = (c, re) => [...c.querySelectorAll("a")].find((a) => re.test(a.textContent));
@@ -108,10 +108,6 @@ const field = (c, re) => {
 };
 const alertText = (c) => c.querySelector('[role="alert"]')?.textContent || "";
 
-const pickService = (c, name) => {
-  const label = [...c.querySelectorAll("label")].find((l) => l.textContent.includes(name));
-  act(() => label.querySelector('input[type="checkbox"]').click());
-};
 const pickTime = (c, label) => act(() => groupButtons(c, "Choose a time").find((b) => b.textContent === label).click());
 const type = (c, re, value) => {
   const input = field(c, re);
@@ -179,44 +175,49 @@ describe("the shop, and only the shop", () => {
   });
 });
 
-describe("choosing services and a time", () => {
-  it("offers no times until a service is chosen — the duration decides the grid", () => {
+describe("picking a time", () => {
+  it("shows the times immediately — there is nothing to choose first", () => {
+    // The whole point of the simplified form: a customer lands on the link and the next thing
+    // they do is tap a time. No menu, no basket, no step 1 to get past.
     const c = mount();
     publish();
-    expect(group(c, "Choose a time")).toBeNull();
-    expect(text(c)).toMatch(/choose a service above/i);
-  });
-
-  it("totals the basket and opens the time grid", () => {
-    const c = mount();
-    publish();
-    pickService(c, "Haircut");
-    expect(text(c)).toMatch(/1 selected/);
     expect(times(c).length).toBeGreaterThan(0);
+    expect(times(c)[0]).toBe("10:00 am");
   });
 
-  it("adds the durations and prices of several services together", () => {
+  it("never asks which services the customer wants", () => {
     const c = mount();
     publish();
-    pickService(c, "Haircut");
-    pickService(c, "Facial");
-    expect(text(c)).toMatch(/2 selected/);
-    expect(text(c)).toContain("90 min");
-    expect(text(c)).toContain("1,200");
+    expect(c.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(text(c)).not.toMatch(/service/i);
+  });
+
+  it("asks for four things and nothing else", () => {
+    const c = mount();
+    publish();
+    // Two text inputs, and the day/time grids. Anything more is a click the customer did not
+    // need to make.
+    const labels = [...c.querySelectorAll("label")].map((l) => l.textContent.trim());
+    expect(labels).toEqual(["Your name", "Mobile number"]);
+  });
+
+  it("holds every booking for the length the owner set", () => {
+    const c = mount();
+    publish({ profile: { ...PROFILE, slotMinutes: 60 } });
+    // 60 minutes against a 21:00 close: the last start that still finishes on time is 20:00.
+    expect(times(c).at(-1)).toBe("8:00 pm");
   });
 
   it("never offers a slot that would run past closing time", () => {
     const c = mount();
     publish();
-    pickService(c, "Facial"); // 60 minutes; the salon closes at 21:00
-    expect(times(c).at(-1)).toBe("8:00 pm");
+    expect(times(c).at(-1)).toBe("8:30 pm"); // 30 min, closing at 21:00
   });
 
   it("honours the notice period on today", () => {
     Date.now.mockReturnValue(Date.UTC(2026, 7, 16, 6, 10, 0)); // 11:40 in the salon's zone
     const c = mount();
     publish();
-    pickService(c, "Haircut");
     // 11:40 + an hour's notice = 12:40, and the grid steps on the quarter hour.
     expect(times(c)[0]).toBe("12:45 pm");
   });
@@ -225,7 +226,6 @@ describe("choosing services and a time", () => {
     Date.now.mockReturnValue(Date.UTC(2026, 7, 16, 6, 10, 0));
     const c = mount();
     publish();
-    pickService(c, "Haircut");
     act(() => groupButtons(c, "Choose a day")[1].click());
     expect(times(c)[0]).toBe("10:00 am"); // opening time, not 12:45
   });
@@ -233,7 +233,6 @@ describe("choosing services and a time", () => {
   it("hides a slot the salon is already full for, and keeps the ones around it", () => {
     const c = mount();
     publish({ slots: { [TODAY]: busyAt(720, 30) } }); // three in the chair at noon, capacity 3
-    pickService(c, "Haircut");
     expect(times(c)).not.toContain("12:00 pm");
     expect(times(c)).toContain("12:30 pm"); // back-to-back is free again
   });
@@ -243,7 +242,6 @@ describe("choosing services and a time", () => {
     // Two stylists at lunch is not two customers in the salon — the third chair can take it.
     const lunch = { b1: { staffId: "staff-1", startMin: 720, durationMin: 60, kind: "block" }, b2: { staffId: "staff-2", startMin: 720, durationMin: 60, kind: "block" } };
     publish({ slots: { [TODAY]: lunch } });
-    pickService(c, "Haircut");
     expect(times(c)).toContain("12:00 pm");
   });
 
@@ -252,14 +250,12 @@ describe("choosing services and a time", () => {
     for (let t = 600; t < 1260; t += 15) Object.assign(busy, Object.fromEntries(Object.entries(busyAt(t, 15)).map(([k, v]) => [`${k}-${t}`, v])));
     const c = mount();
     publish({ slots: { [TODAY]: busy } });
-    pickService(c, "Haircut");
     expect(text(c)).toMatch(/nothing free/i);
   });
 
   it("lets go of a chosen time that somebody else takes while the page is open", () => {
     const c = mount();
     publish();
-    pickService(c, "Haircut");
     pickTime(c, "12:00 pm");
     expect(text(c)).toMatch(/12:00 pm/);
 
@@ -271,7 +267,6 @@ describe("choosing services and a time", () => {
 
 describe("confirming", () => {
   const fill = (c) => {
-    pickService(c, "Haircut");
     pickTime(c, "12:00 pm");
     type(c, /Your name/, "  Riya Sharma  ");
     type(c, /Mobile number/, "+91 98765 00001");
@@ -281,9 +276,8 @@ describe("confirming", () => {
     const c = mount();
     publish();
     await confirm(c);
-    expect(alertText(c)).toMatch(/service/i);
+    expect(alertText(c)).toMatch(/time/i); // no slot chosen yet
 
-    pickService(c, "Haircut");
     pickTime(c, "12:00 pm");
     await confirm(c);
     expect(alertText(c)).toMatch(/name/i);
@@ -308,7 +302,7 @@ describe("confirming", () => {
     // Asia/Kolkata, so a page that seeded its day strip from the device clock — as this one did
     // until the profile-gated `today` went in — books the salon's yesterday and this fails.
     expect(entry).toMatchObject({
-      date: TODAY, startMin: 720, durationMin: 30, serviceIds: ["svc-cut"],
+      date: TODAY, startMin: 720, durationMin: 30,
       customerName: "Riya Sharma", customerPhone: "9876500001", createdAtMs: "SERVER_TIMESTAMP",
     });
     // The chair is the salon's decision, made at import against the real diary.

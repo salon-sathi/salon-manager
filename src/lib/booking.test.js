@@ -424,16 +424,21 @@ describe("reading the projection back", () => {
 });
 
 describe("what the customer submits", () => {
-  const good = { serviceIds: ["s1"], date: "2026-08-16", startMin: 600, name: "Riya", phone: "9876500001", note: "" };
+  const good = { date: "2026-08-16", startMin: 600, name: "Riya", phone: "9876500001" };
 
   it("accepts a complete booking", () => {
     expect(validateBookingForm(good)).toBeNull();
   });
 
-  it("insists on a service, a day, a time, a name and a real mobile", () => {
-    expect(validateBookingForm({ ...good, serviceIds: [] })).toMatch(/service/i);
+  it("insists on a day, a time, a name and a real mobile — and nothing else", () => {
     expect(validateBookingForm({ ...good, date: "" })).toMatch(/day/i);
     expect(validateBookingForm({ ...good, startMin: NaN })).toMatch(/time/i);
+    // Number(null) is 0, which is finite — so a null slot once slipped straight through and
+    // the booking went in at midnight.
+    expect(validateBookingForm({ ...good, startMin: null })).toMatch(/time/i);
+    expect(validateBookingForm({ ...good, startMin: undefined })).toMatch(/time/i);
+    // Services are deliberately not asked for; a form without them is complete.
+    expect(validateBookingForm({ ...good, serviceIds: undefined })).toBeNull();
     expect(validateBookingForm({ ...good, name: "  " })).toMatch(/name/i);
     expect(validateBookingForm({ ...good, phone: "12345" })).toMatch(/mobile/i);
     expect(validateBookingForm({ ...good, phone: "1234567890" })).toMatch(/mobile/i); // must start 6-9
@@ -449,10 +454,13 @@ describe("what the customer submits", () => {
   });
 
   it("normalises and truncates on the way into the inbox entry", () => {
-    const entry = buildInboxEntry({ ...good, phone: "+91 98765 00001", name: "  Riya  ", note: "x".repeat(500) }, { id: "b1", durationMin: 45, stamp: "STAMP" });
+    const entry = buildInboxEntry({ ...good, phone: "+91 98765 00001", name: "  Riya  " }, { id: "b1", durationMin: 45, stamp: "STAMP" });
     expect(entry).toMatchObject({ id: "b1", customerPhone: "9876500001", customerName: "Riya", durationMin: 45, createdAtMs: "STAMP" });
-    expect(entry.note).toHaveLength(200);
     expect(entry.staffId).toBeUndefined(); // the chair is chosen at import, against the real diary
+    // Four fields and a stamp. Anything else here is a field the rules would refuse.
+    expect(Object.keys(entry).sort()).toEqual(
+      ["createdAtMs", "customerName", "customerPhone", "date", "durationMin", "id", "startMin"]
+    );
   });
 
   it("builds the stub that must land atomically alongside it", () => {

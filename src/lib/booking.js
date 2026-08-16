@@ -62,6 +62,11 @@ export const BOOKING_DEFAULTS = {
   capacity: 3,
   leadMinutes: 60,
   horizonDays: 14,
+  // How long to set aside for a booking. The customer does not choose services — the whole
+  // point of the link is four fields and a tap — so there is nothing to derive a length from.
+  slotMinutes: 30,
+  // The SALON's zone, not the device's. See timeZoneFor() below for why this is a setting.
+  timeZone: "",
   noticeText: "",
 };
 
@@ -79,9 +84,26 @@ export function bookingSettings(config) {
     capacity: Math.min(20, Math.max(1, Math.round(num(c.capacity ?? BOOKING_DEFAULTS.capacity)))),
     leadMinutes: Math.max(0, Math.round(num(c.leadMinutes ?? BOOKING_DEFAULTS.leadMinutes))),
     horizonDays: Math.min(MAX_HORIZON_DAYS, Math.max(1, Math.round(num(c.horizonDays ?? BOOKING_DEFAULTS.horizonDays)))),
+    // Kept on the 15-minute diary grid, so an online booking lines up with the rows the desk
+    // reads rather than sitting half a row off every block around it.
+    slotMinutes: Math.min(480, Math.max(SLOT_MIN, Math.round(num(c.slotMinutes ?? BOOKING_DEFAULTS.slotMinutes) / SLOT_MIN) * SLOT_MIN)),
+    timeZone: str(c.timeZone),
     noticeText: str(c.noticeText).slice(0, 200),
   };
 }
+
+/**
+ * The salon's timezone: the owner's setting, or this device's as a fallback.
+ *
+ * It has to be a SETTING. It used to be read straight off whichever device published the
+ * projection, and a salon in Pune went live announcing `America/Indianapolis` because the
+ * machine the owner happened to sign in on had its clock set that way. The booking page derives
+ * both "today" and the notice-period cutoff from this, so a wrong value does not degrade
+ * gracefully — it offers the wrong DAY, and at the wrong end of it.
+ *
+ * A salon's timezone is a fact about the salon. It should not depend on which laptop was open.
+ */
+export const timeZoneFor = (config, fallback = "") => bookingSettings(config).timeZone || fallback;
 
 /**
  * Opening hours from the config, in minutes.
@@ -348,6 +370,7 @@ export function buildProfile(store, config, { updatedAt = "", timeZone = "" } = 
     capacity: rules.capacity,
     leadMinutes: rules.leadMinutes,
     horizonDays: rules.horizonDays,
+    slotMinutes: rules.slotMinutes,
     noticeText: rules.noticeText,
     updatedAt: str(updatedAt),
   };
@@ -510,11 +533,20 @@ export function summarizePublic(serviceIds, services) {
 
 // ── what the customer submits ─────────────────────────────────────────────────────────────────
 
-/** Validate the customer's own details. Returns an error string, or null when it's bookable. */
+/**
+ * Validate the customer's own details. Returns an error string, or null when it's bookable.
+ *
+ * Four fields: day, time, name, mobile. Services are deliberately NOT asked for — the link
+ * exists to be answered in a few taps from a phone, and a menu of eighty-odd services is the
+ * opposite of that. The salon finds out what the customer wants the way it always did, by
+ * asking; the desk adds the services to the booking before it bills.
+ */
 export function validateBookingForm(form) {
-  if (!(form?.serviceIds || []).length) return "Pick at least one service.";
   if (!str(form?.date)) return "Pick a day.";
-  if (!Number.isFinite(Number(form?.startMin))) return "Pick a time.";
+  // `== null` first, deliberately: Number(null) is 0, which is perfectly finite, so a check on
+  // Number.isFinite alone let a customer confirm without ever tapping a time — and the booking
+  // went in at midnight, to be clamped to opening time by the importer.
+  if (form?.startMin == null || !Number.isFinite(Number(form.startMin))) return "Pick a time.";
   if (!str(form?.name).trim()) return "Please enter your name.";
   if (str(form?.name).trim().length > 60) return "That name is too long.";
   if (!isValidPhone(normalizePhone(form?.phone))) return "Enter a valid 10-digit mobile number.";
@@ -540,10 +572,8 @@ export function buildInboxEntry(form, { id, durationMin, stamp }) {
     date: str(form.date),
     startMin: num(form.startMin),
     durationMin: num(durationMin),
-    serviceIds: [...(form.serviceIds || [])].map(String),
     customerName: str(form.name).trim().slice(0, 60),
     customerPhone: normalizePhone(form.phone),
-    note: str(form.note).slice(0, 200),
     createdAtMs: stamp,
   };
 }
@@ -613,6 +643,10 @@ export function assignForImport(appointments, chairIds, entry) {
  * at a negative offset in the diary and disappears off the top of the grid, which is how an
  * appointment gets silently lost; if the owner narrows the hours after a booking is taken, the
  * booking must still be visible.
+ *
+ * `serviceIds` is empty and stays empty: the customer was never asked. The desk fills it in when
+ * the customer arrives, which it has to do anyway before the booking can be billed —
+ * completeToBill refuses an appointment with nothing on it.
  */
 export function importedAppointment(entry, { staffId, hours = DEFAULT_HOURS, timeZone = "" }) {
   const duration = Math.max(SLOT_MIN, num(entry.durationMin));
@@ -624,11 +658,11 @@ export function importedAppointment(entry, { staffId, hours = DEFAULT_HOURS, tim
     staffId: str(staffId),
     startMin,
     durationMin: duration,
-    serviceIds: [...(entry.serviceIds || [])].map(String),
+    serviceIds: [],
     customerPhone: str(entry.customerPhone),
     customerName: str(entry.customerName),
     status: "booked",
-    note: str(entry.note),
+    note: "",
     billId: "",
     source: "online",
     createdAt: dateInZone(entry.createdAtMs, timeZone),
