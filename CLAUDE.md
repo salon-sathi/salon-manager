@@ -55,6 +55,11 @@ number of ticks reliably wins: loading a module is file I/O, not a queued task. 
 every view module is *evaluated* in those suites, so a module-init error in any screen fails
 the suite the same way `app.smoke.test.jsx` catches one in the shell.
 
+**Nothing but a view goes in `src/views/*.jsx` — a test file there matches that glob.** Put a
+spec beside the screen it covers and all four suites load it *as a screen*, running its
+`vi.mock` calls outside a test context; they fail with the stack pointing at the new file rather
+than at them. Every jsdom suite in this repo lives at `src/` root for that reason.
+
 ## Parked sections (feature flags)
 
 [`src/lib/features.js`](src/lib/features.js) holds one flag per section the salon does not
