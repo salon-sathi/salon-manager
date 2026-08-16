@@ -18,7 +18,10 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
-const FIREBASE_MODULE = path.join(REPO_ROOT, "src", "lib", "firebase.js");
+// The config literal lives in its own side-effect-free module so the public booking page can
+// build a database-only Firebase app without importing the auth and storage SDKs. If it moves
+// again, this constant and the CLAUDE.md paragraph describing this parser both move with it.
+const FIREBASE_MODULE = path.join(REPO_ROOT, "src", "lib", "firebaseConfig.js");
 
 // ---- where the emulator is -----------------------------------------------------------
 // Defaults match firebase.json, which stays the source of truth for the ports (see
@@ -29,7 +32,7 @@ export const AUTH_PORT = Number(process.env.E2E_AUTH_PORT || 9099);
 export const DB_PORT = Number(process.env.E2E_DB_PORT || 9000);
 
 /**
- * The project id and database namespace, read out of src/lib/firebase.js at run time.
+ * The project id and database namespace, read out of src/lib/firebaseConfig.js at run time.
  *
  * These are NOT copied here, on purpose. The emulator serves whatever namespace it is asked
  * for and creates it on demand, so a stale copy would not error — it would seed an empty
@@ -155,6 +158,19 @@ export const toMap = (records) => Object.fromEntries(records.map((r) => [r.id, r
 export async function readAsAdmin(dbPath) {
   const res = await ok(await fetch(dbUrl(dbPath), { headers: ADMIN }), `reading ${dbPath}`);
   return res.json();
+}
+
+/**
+ * Read with NO credential at all — the street's view of the database.
+ *
+ * Returns the HTTP status rather than the body, because the assertion worth making is
+ * "refused", and a rules denial is a 401 with a JSON body that reads perfectly happily. Used by
+ * booking.spec.js to prove that opening the public booking page buys a visitor nothing beyond
+ * shop/public.
+ */
+export async function statusAsPublic(dbPath) {
+  const res = await fetch(dbUrl(dbPath));
+  return res.status;
 }
 
 /**

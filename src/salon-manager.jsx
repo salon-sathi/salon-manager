@@ -12,7 +12,10 @@ import { reconcileCustomers } from "./lib/customers.js";
 import { auth, isFirebaseConfigured } from "./lib/firebase.js";
 import { reconcileLoyalty, reconcilePackages } from "./lib/loyalty.js";
 import { ROLE_LABELS, can, isBootstrap, resolveRole, sanitizePermissions } from "./lib/roles.js";
-import { serviceToCartLine } from "./lib/salon.js";
+import { activeStaff, serviceToCartLine } from "./lib/salon.js";
+import { toClock } from "./lib/appointments.js";
+import { assignForImport, bookingSettings, buildChairs, buildProfile, buildPublicServices, buildSlotStubs, deviceTimeZone, hoursFromConfig, importedAppointment, slotStubDiff, splitInbox } from "./lib/booking.js";
+import { clearInboxEntries, importBooking, stamp, subscribeInbox, subscribePublicSlots, writePublicChairs, writePublicProfile, writePublicServices, writeSlotUpdates } from "./lib/publicSync.js";
 import { SLICES, buildSliceUpdate, isLegacyShape, mapToArray, mergeRemote, overwriteSlice, readUsersOnce, readableSlices, subscribeConfig, subscribeConnection, subscribeOwnUser, subscribeSlice, toMap, writeConfig, writeSlice, writeUser } from "./lib/sync.js";
 import { LOGO_SRC } from "./lib/ui/assets.js";
 import { CSS, S } from "./lib/ui/css.js";
@@ -321,6 +324,11 @@ function StoreManager({ user, role, onLogout }) {
   const dataRef = useRef({});
   dataRef.current = { items, sales, expenses, logs, vendorBills: bills, dailyBills, customers, services, staff, appointments, packages, customerPackages, messageTemplates };
   const notifyRef = useRef(null);
+  // Same trick as notifyRef, for the same reason: addLog closes over setLogs and is rebuilt on
+  // every render, so an effect that listed it as a dependency would re-run on every render too.
+  // The online-booking importer is that effect, and re-running it mid-import would fire a second
+  // atomic write for a booking already in flight.
+  const addLogRef = useRef(null);
 
   // ---- offline write-guard ----
   // Mirror `online`/`offlineBlock` into refs so the guard and the toast can read them
@@ -563,6 +571,7 @@ function StoreManager({ user, role, onLogout }) {
       ].slice(0, 2000)
     );
   };
+  addLogRef.current = addLog;
 
   const exportData = async (fmt) => {
     const data = { items, sales, expenses, logs, vendorBills: bills, dailyBills, customCats };
@@ -634,6 +643,110 @@ function StoreManager({ user, role, onLogout }) {
     if (!loaded || !synced.current.customerPackages || !synced.current.sales) return;
     setCustomerPackages((cps) => reconcilePackages(cps, sales));
   }, [sales, customerPackages, loaded]);
+
+  // ---- the public booking link (/book/) ------------------------------------------------
+  // Three jobs, all derived, none of them a running total. See lib/booking.js for the whole
+  // argument; what matters here is that the salon's devices are the only writers of the
+  // world-readable projection, and the only thing that turns a customer's booking into a real
+  // appointment.
+  const bookingOn = useMemo(() => bookingSettings(config).enabled, [config]);
+  const [inbox, setInbox] = useState({});
+  const [publicSlots, setPublicSlots] = useState({});
+  const lastPublished = useRef({ profile: "", services: "", chairs: "" });
+
+  // A) Publish what the booking page is allowed to know. Owner only, because every node it is
+  //    derived from (config, services, staff) is owner-write-only — and so is the projection.
+  //    Published even when switched OFF, so the page can say so rather than time out; the
+  //    `enabled` flag it carries is the same one the rules check.
+  useEffect(() => {
+    if (!loaded || !configSynced.current || role !== "owner") return;
+    if (!synced.current.services || !synced.current.staff) return;
+    const t = setTimeout(() => {
+      const profile = buildProfile(store, config, { updatedAt: todayStr(), timeZone: deviceTimeZone() });
+      const pubServices = buildPublicServices(services);
+      const chairs = buildChairs(staff);
+      // updatedAt is excluded from the drift check: it changes at midnight and would otherwise
+      // republish the whole profile once a day for no reason.
+      const keys = JSON.stringify({ ...profile, updatedAt: "" });
+      const fail = (what) => (e) => console.error("public projection write failed", what, e);
+      if (keys !== lastPublished.current.profile) {
+        lastPublished.current.profile = keys;
+        writePublicProfile(profile).catch(fail("profile"));
+      }
+      const svcKeys = JSON.stringify(pubServices);
+      if (svcKeys !== lastPublished.current.services) {
+        lastPublished.current.services = svcKeys;
+        writePublicServices(pubServices).catch(fail("services"));
+      }
+      const chairKeys = JSON.stringify(chairs);
+      if (chairKeys !== lastPublished.current.chairs) {
+        lastPublished.current.chairs = chairKeys;
+        writePublicChairs(chairs).catch(fail("chairs"));
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [config, store, services, staff, loaded, role]);
+
+  // B) Watch the inbox and the published occupancy — only while the link is live, so a salon
+  //    that never turns this on pays for neither subscription.
+  useEffect(() => {
+    if (!loaded || !bookingOn) { setInbox({}); setPublicSlots({}); return; }
+    const unsubInbox = subscribeInbox(setInbox, (e) => console.error("inbox read failed", e));
+    const unsubSlots = subscribePublicSlots(setPublicSlots, (e) => console.error("public slots read failed", e));
+    return () => { unsubInbox(); unsubSlots(); };
+  }, [loaded, bookingOn]);
+
+  // C) Drain the inbox into the diary. This is what "the booking turns up by itself" means:
+  //    no button, no review queue — any staff device with the app open materialises it.
+  //
+  //    The chair is chosen HERE rather than by the customer's browser, against the real diary
+  //    rather than a projection that could be a few seconds stale, and it never refuses: a
+  //    booking the salon has already accepted must reach the diary even if the slot filled up
+  //    in between, because layoutDay renders the clash side by side where somebody will see it.
+  useEffect(() => {
+    if (!loaded || !bookingOn || !synced.current.appointments || !synced.current.staff) return;
+    if (!allow("appointments.edit")) return;
+    const { toImport, toClear } = splitInbox(inbox, appointments);
+    if (!toImport.length && !toClear.length) return;
+    const hours = hoursFromConfig(config);
+    const timeZone = deviceTimeZone();
+    const chairIds = activeStaff(staff).map((s) => s.id);
+    if (toClear.length) clearInboxEntries(toClear).catch((e) => console.error("inbox cleanup failed", e));
+    if (!chairIds.length) return; // no stylists yet: leave the bookings queued rather than lose them
+    // Sequential, not Promise.all: each import is its own atomic fan-out, and a later one must
+    // see the chair the previous one took.
+    let live = true;
+    (async () => {
+      const placed = [...appointments];
+      for (const entry of toImport) {
+        if (!live) return;
+        const staffId = assignForImport(placed, chairIds, entry);
+        const rec = importedAppointment(entry, { staffId, hours, timeZone });
+        try {
+          await importBooking(rec);
+          placed.push(rec);
+          addLogRef.current?.("appointments", `Online booking — ${rec.customerName} on ${rec.date} at ${toClock(rec.startMin)}`);
+        } catch (e) {
+          console.error("booking import failed", entry.id, e);
+          return; // leave it in the inbox; the next snapshot tries again
+        }
+      }
+    })();
+    return () => { live = false; };
+  }, [inbox, appointments, staff, config, loaded, bookingOn, allow]);
+
+  // D) Keep the published occupancy honest. Deltas only — never a whole-node set, which would
+  //    race a customer's in-flight booking and re-offer a slot that is already taken.
+  useEffect(() => {
+    if (!loaded || !bookingOn || !synced.current.appointments) return;
+    const from = todayStr();
+    const { horizonDays } = bookingSettings(config);
+    const { toImport } = splitInbox(inbox, appointments);
+    const desired = buildSlotStubs(appointments, toImport, { from, days: horizonDays });
+    const { updates, changed } = slotStubDiff(publicSlots, desired, { from, nowMs: Date.now(), stamp: stamp() });
+    if (!changed) return;
+    writeSlotUpdates(updates).catch((e) => console.error("public slots write failed", e));
+  }, [appointments, inbox, publicSlots, config, loaded, bookingOn]);
 
   // "Complete → Bill": hand an appointment to the POS pre-filled with its customer, its
   // services and who performed them, then link the two together once the bill is saved.

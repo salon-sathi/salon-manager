@@ -498,6 +498,34 @@ Two decisions worth knowing about:
 Working hours come from **Settings** and bound the grid; a booking outside them is refused
 rather than rendered off-screen.
 
+### Online booking
+
+Settings → **Online booking** turns on a public link — `…/salon-manager/book/` — that the salon
+can put in an Instagram bio, on Google Business, or on a QR card at the counter. There is a
+**Copy link** and a **Share on WhatsApp** button right there.
+
+What the customer sees is the *shop*: its name, its address, a **Get directions** button and a
+phone number. They pick services, a day and a time, give a name and a mobile, and that's it.
+They never see a stylist's name and never choose one — the salon's app assigns the chair when
+the booking arrives, and the booking appears in the diary marked 🌐 with nobody typing it in.
+
+Four settings bound it, all owner-set:
+
+- **Customers at a time** (default 3) — the most people the salon can have in the building at
+  once. A booking that would put one more than this in the chair at *any minute* is refused. It
+  also can't book a stylist who is already busy, so whichever runs out first wins.
+- **Notice needed** and **how far ahead** people can book.
+- Opening and closing times come from **Working hours** above. To close a whole day, block every
+  stylist out for it in the diary and the link will offer nothing.
+
+Two things to be straight about. **Anyone with the link can book** — there is no login and the
+mobile number isn't verified, so ring to confirm anything that looks odd; the capacity cap bounds
+what a prank can cost you, and the switch stops new bookings the moment you turn it off (that is
+enforced by the database, not just the page). And because the cap is checked in the browser, two
+customers confirming the same slot in the same second can both get through; they are deliberately
+put on *different* stylists when that happens, and the diary shows the clash side by side rather
+than hiding it.
+
 ## Deploying
 
 Pushing to `main` builds and publishes to **GitHub Pages** via

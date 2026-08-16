@@ -152,9 +152,17 @@ export const blankAppointment = (date = "", staffId = "", startMin = 0, createdA
   durationMin: SLOT_MIN,
   serviceIds: [],
   customerPhone: "",
+  // The name the customer gave, carried on the booking itself. A desk booking leaves this
+  // empty and reads the name off shop/customers; one that came in through the public link has
+  // no customer record yet and cannot create one, so without this the diary would show
+  // "Walk-in" for someone who told the salon exactly who they were. See lib/booking.js.
+  customerName: "",
   status: "booked",
   note: "",
   billId: "",
+  // "" for anything booked at the counter, "online" for the public link. The diary badges it so
+  // the desk knows to ring and confirm a booking nobody spoke to.
+  source: "",
   createdAt,
 });
 

@@ -141,6 +141,129 @@
         ".write": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true"
       },
 
+      // ---- publicBookings: the customer's inbox ----------------------------
+      // The ONLY node an unauthenticated client may write, anywhere in this
+      // file. Create-only, one record at a time, strictly shaped, and NOT
+      // readable without a staff account — it holds a name and a phone number.
+      //
+      // Staff read it and delete it. The importer in the shell moves each entry
+      // into shop/appointments in ONE atomic fan-out (appointment written, inbox
+      // entry nulled), so an entry that is gone has been imported. The
+      // appointment takes the INBOX ID and derives every other field, which is
+      // what makes that safe: two devices draining the same entry at the same
+      // moment write identical records, and a booking the salon later deletes
+      // can never be resurrected, because the entry that would resurrect it went
+      // in the same update as the appointment.
+      //
+      // WHY A SEPARATE NODE, and not a create-only rule on shop/appointments:
+      // .write rules CASCADE and only ever GRANT. The appointments slice already
+      // grants write to every active user, so a $id rule there could not
+      // restrict staff — it could only add the public branch, leaving .validate
+      // as the sole constraint. But .validate applies to every writer, so each
+      // field rule would need an `auth != null ||` escape hatch: a dozen
+      // dual-purpose expressions guarding the busiest node in the app, where
+      // forgetting one hatch breaks the counter mid-shift and forgetting one
+      // clause hands a signed-in stranger an unvalidated write into the live
+      // diary. Here every .validate below means exactly one thing.
+      //
+      // The kill switch is shop/public/profile/enabled. Rules read the datastore
+      // with full privileges regardless of .read (same as the shop/users lookups
+      // above), and the booking page reads that SAME value — so "the button is
+      // hidden" and "the write is refused" can never disagree. A missing value
+      // is `null === true` → false: this fails CLOSED.
+      "publicBookings": {
+        ".read": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true",
+
+        "$id": {
+          // Second branch deliberately does NOT test `auth == null`. A customer
+          // carrying a stale Firebase session from some other visit is still a
+          // customer, and there is no asymmetry to exploit: every .validate here
+          // applies unconditionally, to staff and public alike.
+          ".write": "(auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true) || (!data.exists() && newData.exists() && root.child('shop/public/profile/enabled').val() === true)",
+
+          // A delete writes null, and .validate never runs on a node being
+          // removed — hence the guard, same idiom as sales and customers above.
+          ".validate": "!newData.exists() || (newData.hasChildren(['id', 'date', 'startMin', 'durationMin', 'serviceIds', 'customerName', 'customerPhone', 'createdAtMs']) && newData.child('id').val() === $id)",
+
+          "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40" },
+          "date": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "startMin": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
+          "durationMin": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= 480" },
+          // RTDB stores an empty array as null, so the key vanishes and the
+          // hasChildren above already refuses it. $i caps the basket at ten.
+          "serviceIds": {
+            ".validate": "newData.hasChildren()",
+            "$i": { ".validate": "$i.matches(/^\\d$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 40" }
+          },
+          "customerName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60" },
+          // The same shape customers.js enforces at the counter (isValidPhone).
+          "customerPhone": { ".validate": "newData.isString() && newData.val().matches(/^[6-9]\\d{9}$/)" },
+          "note": { ".validate": "newData.isString() && newData.val().length <= 200" },
+          // ServerValue.TIMESTAMP, pinned. NOT Date.now(): a budget phone ten
+          // minutes out of step would fail any tolerance window and lose the
+          // booking, and a far-future value would make its slot stub unprunable.
+          "createdAtMs": { ".validate": "newData.isNumber() && newData.val() === now" },
+          "$other": { ".validate": false }
+        }
+      },
+
+      // ---- public: the only unauthenticated READ surface --------------------
+      // A projection, rebuilt from config + services + staff + appointments by
+      // the devices that already own those. Nothing under here carries a name, a
+      // phone other than the shop's own, or what anybody paid — a stylist
+      // appears as a bare id and nothing else, because the booking page has to
+      // know a chair is free without learning whose it is.
+      //
+      // Each part is writable by whoever can write what it is derived FROM:
+      // profile/services/chairs come from owner-only nodes, so owner-only;
+      // slots come from the diary, so any active user keeps them fresh.
+      "public": {
+        ".read": true,
+
+        "profile": {
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() === 'owner' && root.child('shop/users').child(auth.uid).child('active').val() === true",
+          ".validate": "!newData.exists() || newData.hasChildren(['name', 'enabled'])",
+          "enabled": { ".validate": "newData.isBoolean()" }
+        },
+
+        "services": {
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() === 'owner' && root.child('shop/users').child(auth.uid).child('active').val() === true"
+        },
+
+        "chairs": {
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() === 'owner' && root.child('shop/users').child(auth.uid).child('active').val() === true"
+        },
+
+        // Occupancy stubs, by day then by booking id: when a chair is busy and
+        // whether that is a customer or blocked-out time. No id, no name, no
+        // service. The customer writes theirs in the same atomic fan-out as the
+        // booking, so the page cannot offer a slot that a booking no staff
+        // device has seen yet already holds. Staff write and prune the rest.
+        "slots": {
+          // Staff are granted here, at the top of the subtree, rather than per
+          // record: the reconcile also drops whole past days (a null at $date),
+          // which a grant that only reached $id would refuse. .write cascades
+          // and only ever grants, so the public branch below still stands on its
+          // own — and .validate applies to both writers either way, which is
+          // what keeps one shape for the salon and the street.
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('active').val() === true",
+
+          "$date": {
+            "$id": {
+              ".write": "!data.exists() && newData.exists() && root.child('shop/public/profile/enabled').val() === true",
+              ".validate": "!newData.exists() || ($date.matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.hasChildren(['startMin', 'durationMin', 'createdAtMs']))",
+
+              "staffId": { ".validate": "newData.isString() && newData.val().length <= 40" },
+              "startMin": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1440" },
+              "durationMin": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= 480" },
+              "kind": { ".validate": "newData.isString() && (newData.val() === 'appt' || newData.val() === 'block')" },
+              "createdAtMs": { ".validate": "newData.isNumber() && newData.val() === now" },
+              "$other": { ".validate": false }
+            }
+          }
+        }
+      },
+
       // ---- customers --------------------------------------------------------
       // Billing must look customers up and quick-create them, so every active
       // role can read and write this slice. RTDB rules are per-node, so we

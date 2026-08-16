@@ -11,7 +11,8 @@ import { useMediaQuery } from "../lib/ui/hooks.js";
 import { useMemo, useState } from "react";
 import { S } from "../lib/ui/css.js";
 import { ServiceIcon } from "../components/ServiceIcon.jsx";
-import { CustomerPicker } from "../components/CustomerPicker.jsx";
+import { CustomerPicker, makeCustomer, validateCustomer } from "../components/CustomerPicker.jsx";
+import { blankCustomer, formatPhone } from "../lib/customers.js";
 
 // ---------- Appointments ----------
 // A hand-rolled CSS-grid day view: one column per working stylist, 15-minute rows down the
@@ -260,8 +261,15 @@ function Appointments({
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden" }}>
                       {blockIcon && <ServiceIcon icon={blockIcon} size={14} />}
+                      {/* Booked on the public link. The desk hasn't spoken to this person and
+                          the number isn't verified, so the block says where it came from. */}
+                      {appt.source === "online" && <span aria-hidden="true" title="Booked online">🌐</span>}
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {appt.status === "blocked" ? "⛔ Blocked" : cust?.name || "Walk-in"}
+                        {/* An online booking has no shop/customers record yet — the customer's
+                            page cannot create one — so the name it carries is the only name
+                            there is. Without this fallback the desk would read "Walk-in" for
+                            somebody who told the salon exactly who they were. */}
+                        {appt.status === "blocked" ? "⛔ Blocked" : cust?.name || appt.customerName || "Walk-in"}
                       </span>
                     </div>
                     {h > 30 && (
@@ -309,6 +317,20 @@ function AppointmentModal({
       serviceIds: d.serviceIds.includes(id) ? d.serviceIds.filter((x) => x !== id) : [...d.serviceIds, id],
     }));
 
+  // File an online booking's customer onto the real customer list, with the name and number
+  // they gave. Goes through the same validate/make pair the picker's quick-create uses, so a
+  // customer created this way is indistinguishable from one typed in at the counter.
+  const saveOnlineCustomer = () => {
+    const rec = makeCustomer(
+      { ...blankCustomer(draft.customerPhone, todayStr()), name: draft.customerName },
+      { createdAt: todayStr() }
+    );
+    const problem = validateCustomer(rec, customers, true);
+    if (problem) return notify(`⚠ ${problem}`);
+    setCustomers((list) => [...list, rec]);
+    notify(`✓ ${rec.name} added`);
+  };
+
   // Free/busy feedback while the time is being chosen, rather than only on save. The front desk
   // is talking to a customer — "3:15 is free" beats a rejection after the fact.
   const clash = useMemo(() => {
@@ -354,6 +376,24 @@ function AppointmentModal({
 
       {!isBlock && (
         <>
+          {/* A booking that came in on the public link. The customer gave their name and number
+              but has no shop/customers record — the booking page cannot write one, deliberately,
+              because that node's rules would let an unauthenticated write RENAME an existing
+              customer. So the details ride on the appointment until somebody here files them,
+              and until then the picker below has nothing to show. */}
+          {draft.source === "online" && !customers.some((c) => c.phone === draft.customerPhone) && (
+            <div style={{ background: "var(--surface-2, #F4FAF6)", border: "1px solid var(--tint-info-border, #CFE3D7)", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontSize: 12.5 }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>🌐 Booked online</div>
+              <div style={{ color: "var(--text-mid, #6B7E74)", marginBottom: 6 }}>
+                {draft.customerName || "No name given"} · {formatPhone(draft.customerPhone) || "no number"}
+                {" — not on the customer list yet. The number hasn't been verified; ring to confirm."}
+              </div>
+              {draft.customerName && draft.customerPhone && (
+                <button className="btn small" onClick={saveOnlineCustomer}>Add to customer list</button>
+              )}
+            </div>
+          )}
+
           <Field label="Customer">
             <CustomerPicker
               customers={customers} value={draft.customerPhone} onPick={(p) => set("customerPhone", p)}

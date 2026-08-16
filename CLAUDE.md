@@ -30,6 +30,7 @@ nav and the view switch.
 | `src/components/*.jsx` | UI shared by more than one view. |
 | `src/lib/ui/*.js` | shared non-React UI logic: formatting, the theme/store config, the nav map, stock arithmetic, the stylesheet. |
 | `src/lib/*.js` | unchanged — pure domain logic, no React. |
+| `src/book/*` | the **public booking page** — a second entry point, not part of the app. See "The public booking link". |
 
 **Every view is `React.lazy`.** The switch in the shell holds a `lazy(() => import(...))` per
 screen and one `<Suspense>` around the rendered view, so the counter tablet downloads the till
@@ -129,6 +130,24 @@ Pinned by `scripts/vite-pwa-plugin.test.js`, along with "no `skipWaiting()` on i
 manifest). The lazy view chunks, pdfjs and xlsx are cached when first fetched — precaching them
 would make a first visit download the whole app before the till could open.
 
+**The precache list and `manualChunks` are one mechanism, not two.** `SHELL` matches
+`^assets/(index|react|firebase)-`, so a chunk's NAME decides whether the app can start offline.
+Two consequences: the `index` key in `rollupOptions.input` is load-bearing (rename it and the
+app's own entry chunk silently leaves the shell), and `manualChunks` must be a **function**, not
+the `{ name: [packages] }` map it used to be. That map named each package's entry point but not
+its internals, so recharts' copy of the React tree won: react-dom ended up inside `charts`,
+`react-<hash>.js` was emitted as a 30-byte stub that did nothing but import it, and the worker
+faithfully precached the stub. The shell could not boot with the network off — the one thing the
+worker exists for — and it looked fine in every test, because nothing asserts the *contents* of a
+precached chunk.
+
+**Navigations are cached per URL, not under one key.** The worker's scope is the whole base path,
+so it also controls the booking page at `<base>book/`. `c.put(INDEX, …)` on every navigation meant
+the last document visited won: a customer booking on the counter tablet replaced the app shell,
+and the salon's next offline start opened the booking form. `INDEX` remains the fallback for a URL
+nobody has visited. `playwright.config.js` sets `serviceWorkers: "block"`, so no e2e spec can ever
+catch this — the assertion in `scripts/vite-pwa-plugin.test.js` is the only guard.
+
 `vite preview` needs `isPreview` in `vite.config.js` to serve at `/salon-manager/`. Without it
 the built app is served at `/` while its own HTML asks for `/salon-manager/…`, every asset falls
 through to the SPA fallback, and the manifest and worker both arrive as `text/html` — which
@@ -171,6 +190,8 @@ is only the UI mirror of it. The rules are exercised by:
 - [`tests/rules/rbac.test.js`](tests/rules/rbac.test.js) — the role matrix.
 - [`tests/rules/bootstrap.test.js`](tests/rules/bootstrap.test.js) — first-owner
   self-registration, lockdown once claimed, unauthenticated access, last-owner lockout.
+- [`tests/rules/publicBooking.test.js`](tests/rules/publicBooking.test.js) — the one
+  unauthenticated write in the file, and everything it must still not reach.
 
 Config lives in [`vitest.rules.config.js`](vitest.rules.config.js), not `vite.config.js`.
 
@@ -290,7 +311,8 @@ the salon uses.
 
 The specs: `smoke` (the rig), `auth` (sign-in + the role gate), `appointments` (the diary and
 its overlap check), `billing` (the money, print, and the receipt JPEG), `loyalty` (points,
-tiers, prepaid packages), `inventory` (stock movement).
+tiers, prepaid packages), `inventory` (stock movement), `booking` (the public link — a
+signed-out customer booking themselves into the diary).
 
 **Reconciled slices are reset per test, not per run.** `customers`, `customerPackages` and
 `items` are all rewritten by the app — `reconcileLoyalty` and `reconcilePackages` recompute
@@ -361,7 +383,7 @@ the SVG) makes `toBlob` throw and a blank render still encodes to a valid, tiny 
 arrived". Pinned by mutation: neutering `toXhtml` makes that spec fail.
 
 **The database namespace is derived, not typed.** `seed.js` parses `databaseURL` out of
-`src/lib/firebase.js` and takes its first hostname label — `salon-manager-49a88-default-rtdb`,
+`src/lib/firebaseConfig.js` and takes its first hostname label — `salon-manager-49a88-default-rtdb`,
 which is what `connectDatabaseEmulator` keeps when it swaps in the emulator's host:port
 (verified against the SDK's actual `ns=` parameter). A hardcoded copy would not error if it
 drifted: the emulator creates any namespace on demand, so the roster would land beside the one
@@ -436,6 +458,101 @@ the link is not signed in and never will be. What protects a receipt is an ungue
 Firebase's random download token, on a path keyed by **sale id, never the phone number**.
 Nothing writes the uploaded URL back onto the sale; re-sending re-uploads to the same
 deterministic path, for the same reason nothing in this app keeps a running total.
+
+## The public booking link
+
+A link the salon can put in an Instagram bio or on a QR at the counter, so a customer can book
+themselves in. The customer sees the **shop** — name, address, directions, phone — and never a
+stylist's name; the chair is chosen for them. Owner-controlled from Settings → Online booking,
+and **off by default**.
+
+| Where | What |
+|---|---|
+| [`src/lib/booking.js`](src/lib/booking.js) | pure: capacity, chair assignment, the projection builders, the import. No React, no Firebase. |
+| [`src/lib/publicSync.js`](src/lib/publicSync.js) | the thin RTDB adapter — the paths, and the two atomic fan-outs |
+| [`src/book/*`](src/book/) | the customer's page: its own entry, its own React root, its own database-only Firebase app |
+| [`book/index.html`](book/index.html) | the second Vite entry → `dist/book/index.html` → `<base>book/` |
+| `shop/public/{profile,services,chairs,slots}` | world-readable projection, published by the salon's devices |
+| `shop/publicBookings/<id>` | the inbox: the one unauthenticated write in `database.rules.json` |
+
+### Why an inbox, and not a create-only rule on `shop/appointments`
+
+Because RTDB `.write` rules **cascade and only ever grant**. The appointments slice already
+grants write to every active user, so a `$id` rule there could not *restrict* staff — it could
+only add the public branch, leaving `.validate` as the sole constraint. But `.validate` applies
+to every writer, so each field rule would need an `auth != null ||` escape hatch: a dozen
+dual-purpose expressions guarding the busiest node in the app, where forgetting one hatch breaks
+the counter mid-shift and forgetting one clause hands a signed-in stranger an unvalidated write
+into the live diary. **`shop/appointments` is untouched by this feature**, and every `.validate`
+on the new nodes means exactly one thing.
+
+The cost is that a booking is materialised by a staff device rather than on arrival. That costs
+nobody anything: the customer's write always lands, and the import happens the moment any signed-in
+device has the app open — which is the only moment anyone is looking at the diary.
+
+### The two atomic fan-outs
+
+Both are root-level `update()` calls, so both paths land or neither does.
+
+1. **The customer** writes the inbox entry *and* its occupancy stub together. The stub is what
+   makes the cap work with **no staff device online at all** — the next visitor reads the
+   occupancy this one wrote instead of waiting for the salon to open the app.
+2. **The salon** writes the appointment *and* nulls the inbox entry together. So an entry that is
+   gone has been imported, and an appointment the salon later deletes can never be resurrected —
+   the entry that would resurrect it went in the same update. The appointment takes the **inbox
+   id** and derives every other field (no `uid()`, no `Date.now()`), so two devices draining the
+   same entry write byte-identical records and the loser is a no-op.
+
+The importer must **not** go through `setAppointments`: the debounced slice pusher would send the
+appointment as a separate write from the inbox delete, and a failure between the two loses the
+booking.
+
+### Capacity is peak concurrency, not an overlap count
+
+"Three customers at a time" means three in the building at any one minute. Take
+A 10:00–10:45, B 10:45–11:30, C 10:15–11:00 and a request for 10:00–11:00: it overlaps all three
+records, so an overlap count refuses it — but A has left before B arrives, and the busiest minute
+holds three. Counting overlaps turns away customers the salon has room for every time bookings
+are staggered, which is what a salon's day looks like. `peakConcurrency` sweeps events instead,
+and only over the records that overlap the proposed slot: sweeping the whole day would let a
+pre-existing 9am overbooking refuse an 8pm booking.
+
+A `blocked` record takes a chair out of service but is **not** a customer in the building, so it
+does not consume capacity — that is what `kind` on a stub is for. It is also how the salon closes
+a whole day without a closed-dates feature: block every stylist and the link offers nothing.
+
+### Five things that will bite
+
+1. **The cap is enforced client-side, and cannot be otherwise.** RTDB rules cannot count
+   siblings — the same limit that stops the rules protecting the last owner. Two customers
+   confirming in the same second can both pass. The page re-reads occupancy immediately before
+   writing, which shrinks the window to one round trip; ties in `assignChair` break on a hash of
+   the booking id, so the two land on *different* chairs rather than double-booking one stylist;
+   and `layoutDay` renders any genuine clash side by side where the desk will see it. Closing it
+   properly needs a Cloud Function, or per-slot seat claims.
+2. **The kill switch lives at `shop/public/profile/enabled`, not `config.onlineBooking`.** The
+   rules read it and so does the page, so "the button is hidden" and "the write is refused" can
+   never disagree. A missing value is `null === true` → false: it fails **closed**, which is the
+   correct default for a salon that has never heard of this feature.
+3. **`createdAtMs` is `serverTimestamp()`, pinned by the rules as `=== now`.** Not a client
+   value with a tolerance window: a budget handset ten minutes out of step is common, and it
+   would lose that customer's booking. It also stops a far-future value making a stub unprunable.
+4. **The reconcile writes deltas, never a whole-node `set()`.** A `set()` between a customer's
+   stub write and the next snapshot silently drops their occupancy — their appointment survives
+   and the slot reads *free*, which is the one failure the projection exists to prevent. For the
+   same reason an orphan stub is only removed once it is older than 60s, and `buildSlotStubs`
+   includes bookings still sitting in the inbox.
+5. **"Today" comes from the salon's timezone, never the device's.** `profile.timeZone` is
+   published by the owner's browser and the page derives both the day strip and the notice-period
+   cutoff from it. The page seeds a default day *before* the profile arrives, so `today` is gated
+   on the profile and the chosen day is re-seeded whenever it falls outside the window — which
+   also handles a page left open past midnight. Without that, a customer books the salon's
+   yesterday, and it is invisible to anyone testing in the salon's own timezone.
+
+`shop/public` carries no PII by construction — a stylist is a bare id, a stub says only that a
+chair is busy — and `shop/publicBookings` holds a name and a phone, so it is **not** publicly
+readable and deliberately **not** a slice in `sync.js`: SLICES would give it a debounced pusher, a
+3-way merge and a `localStorage` entry, putting a customer's number on a shared counter tablet.
 
 ## Service icons
 

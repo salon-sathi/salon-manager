@@ -9,6 +9,7 @@ import { ICON_STYLES, ICON_STYLE_KEYS, STORE, THEMES, THEME_KEYS, authMessage, i
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { S } from "../lib/ui/css.js";
 import { loyaltyRules } from "../lib/loyalty.js";
+import { MAX_HORIZON_DAYS, bookingSettings, isSafeHttpUrl, mapsUrlFor } from "../lib/booking.js";
 import { INR, money, todayStr } from "../lib/ui/format.js";
 import { OTHER_TABS, TOP_TABS, tabAllowed, tabEnabled } from "../lib/ui/nav.js";
 import { subscribeUsers, updateUser, writeUser } from "../lib/sync.js";
@@ -27,6 +28,7 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
   const toDraft = (c = {}) => ({
     name: c.name || "", tagline: c.tagline || "", address: c.address || "",
     phone: c.phone || "", pcIp: c.pcIp || "", logo: c.logo || "", paymentQr: c.paymentQr || "",
+    mapsUrl: c.mapsUrl || "",
     upiId: c.upiId || "", upiName: c.upiName || "",
     // `=== true`, matching effectiveStore(): a config saved before this switch existed has no
     // such key and must read as off. Also keeps the draft a real boolean, so the dirty flag
@@ -74,6 +76,12 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
     if (draft.upiId.trim() && !isValidUpiId(draft.upiId)) {
       return notify("⚠ Enter a valid UPI ID like mysalon@okhdfcbank, or leave it blank");
     }
+    // This one ends up as an href on the PUBLIC booking page, where anyone can open it. A
+    // `javascript:` URL saved here would be script running on a page served to customers, so it
+    // is checked on the way in as well as on the way out (mapsUrlFor does it again at render).
+    if (draft.mapsUrl.trim() && !isSafeHttpUrl(draft.mapsUrl)) {
+      return notify("⚠ The map link must start with https:// — or leave it blank to use the address");
+    }
     const open = parseHM(draft.openTime);
     const close = parseHM(draft.closeTime);
     if (!Number.isFinite(open) || !Number.isFinite(close)) return notify("⚠ Enter valid opening and closing times");
@@ -87,6 +95,7 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
       ...config,
       name: draft.name.trim(), tagline: draft.tagline.trim(), address: draft.address.trim(),
       phone: draft.phone.trim(), pcIp: draft.pcIp.trim(), logo: draft.logo || "", paymentQr: draft.paymentQr || "",
+      mapsUrl: draft.mapsUrl.trim(),
       upiId: draft.upiId.trim(), upiName: draft.upiName.trim(),
       showStaffOnReceipt: !!draft.showStaffOnReceipt,
       theme: THEMES[draft.theme] ? draft.theme : "emerald",
@@ -161,6 +170,14 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
           <Field label="Shop name"><input className="input" value={draft.name} placeholder={STORE.name} onChange={(e) => set("name", e.target.value)} /></Field>
           <Field label="Tagline"><input className="input" value={draft.tagline} placeholder={STORE.tagline} onChange={(e) => set("tagline", e.target.value)} /></Field>
           <Field label="Address"><textarea className="input" rows={3} style={{ resize: "vertical" }} value={draft.address} placeholder={STORE.address} onChange={(e) => set("address", e.target.value)} /></Field>
+          <Field label="Google Maps link (optional)">
+            <input className="input" type="url" inputMode="url" value={draft.mapsUrl} placeholder={mapsUrlFor(draft.address, "") || "https://maps.app.goo.gl/…"} onChange={(e) => set("mapsUrl", e.target.value)} />
+          </Field>
+          <div style={{ fontSize: 11.5, color: "var(--text-mid, #8A9C90)", margin: "-2px 0 12px", lineHeight: 1.5 }}>
+            The <b>Get directions</b> button on the online booking page. Leave it blank and the
+            address above is searched on Maps automatically — set one only when that search lands
+            on the wrong spot. Paste the <i>Share → Copy link</i> URL from Google Maps.
+          </div>
           <div className="g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <Field label="Phone"><input className="input" type="tel" value={draft.phone} placeholder="e.g. +91 98765 43210" onChange={(e) => set("phone", e.target.value)} /></Field>
             <Field label="Shop PC IP address">
@@ -304,10 +321,138 @@ function StoreConfig({ config, setConfig, notify, log, user, role, perms }) {
         </div>
       </section>
 
+      <OnlineBooking config={config} setConfig={setConfig} notify={notify} log={log} />
+
       {can(role, "loyalty.configure", perms) && <LoyaltyConfig config={config} setConfig={setConfig} notify={notify} log={log} />}
       {can(role, "users.manage", perms) && <Users user={user} notify={notify} log={log} />}
       {can(role, "users.manage", perms) && <RoleFeatures config={config} setConfig={setConfig} notify={notify} log={log} />}
     </div>
+  );
+}
+
+// ---------- Settings → Online booking (owner only) ----------
+// The public /book/ link: whether the salon takes bookings from it, and the three numbers that
+// bound what it will offer. Everything here is owner-only in database.rules.json, so this panel
+// sits inside StoreConfig — which is already behind settings.manage — rather than carrying its
+// own gate.
+//
+// Two things worth knowing at this screen:
+//
+// 1. `enabled` is a REAL kill switch, not a UI toggle. The rules refuse an unauthenticated
+//    write unless shop/public/profile/enabled is true, so turning it off here stops bookings
+//    at the database — a stale tab with the page already open cannot slip one through.
+// 2. Everything on this panel is published from the OWNER's device, because the projection it
+//    writes (shop/public/profile) is owner-write-only, exactly like the config it comes from.
+//    Saving is what publishes it; there is nothing else to press.
+function OnlineBooking({ config, setConfig, notify, log }) {
+  const current = useMemo(() => bookingSettings(config), [config]);
+  const [draft, setDraft] = useState(() => ({
+    enabled: current.enabled,
+    capacity: String(current.capacity),
+    leadMinutes: String(current.leadMinutes),
+    horizonDays: String(current.horizonDays),
+    noticeText: current.noticeText,
+  }));
+  const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+
+  // Whatever host this app is being served from, plus the booking page's own path. Derived
+  // rather than typed, so it is right on GitHub Pages, on a preview build and in dev without
+  // anybody maintaining a copy of the deploy URL.
+  const link = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URL(`${import.meta.env.BASE_URL}book/`, window.location.origin).href;
+  }, []);
+
+  const save = () => {
+    const capacity = Number(draft.capacity);
+    const leadMinutes = Number(draft.leadMinutes);
+    const horizonDays = Number(draft.horizonDays);
+    if (![capacity, leadMinutes, horizonDays].every((x) => Number.isFinite(x) && x >= 0)) {
+      return notify("⚠ Every number here must be a number, and none can be negative.");
+    }
+    if (capacity < 1) return notify("⚠ At least 1 customer at a time, or the link can never book anything.");
+    if (horizonDays < 1) return notify("⚠ The booking window has to be at least 1 day.");
+    if (horizonDays > MAX_HORIZON_DAYS) return notify(`⚠ Customers can book at most ${MAX_HORIZON_DAYS} days ahead.`);
+    setConfig((c) => ({
+      ...c,
+      onlineBooking: {
+        enabled: draft.enabled, capacity, leadMinutes, horizonDays,
+        noticeText: draft.noticeText.trim().slice(0, 200),
+      },
+    }));
+    log?.("settings", `Online booking ${draft.enabled ? "ON" : "OFF"} — ${capacity} at a time, ${leadMinutes} min notice, ${horizonDays} days ahead`);
+    notify(draft.enabled ? "✓ Online booking is on" : "✓ Online booking is off");
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      notify("✓ Booking link copied");
+    } catch {
+      // Clipboard access is refused on an insecure origin and in some in-app browsers.
+      notify("⚠ Couldn't copy — select the link and copy it by hand");
+    }
+  };
+
+  const shareLink = () => {
+    const text = `Book an appointment at ${config?.name || STORE.name}: ${link}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <section style={{ ...S.panel, marginTop: 16 }}>
+      <div style={S.panelHead}>Online booking</div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 12, cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={draft.enabled}
+          onChange={(e) => set("enabled", e.target.checked)}
+          style={{ width: 18, height: 18, cursor: "pointer", accentColor: "var(--accent, var(--brand))" }}
+        />
+        <span>Let customers book from a link</span>
+      </label>
+
+      {draft.enabled && (
+        <>
+          <div className="g3" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <Field label="Customers at a time"><input className="input" inputMode="numeric" value={draft.capacity} onChange={(e) => set("capacity", e.target.value)} /></Field>
+            <Field label="Notice needed (minutes)"><input className="input" inputMode="numeric" value={draft.leadMinutes} onChange={(e) => set("leadMinutes", e.target.value)} /></Field>
+            <Field label="Can book this far ahead (days)"><input className="input" inputMode="numeric" value={draft.horizonDays} onChange={(e) => set("horizonDays", e.target.value)} /></Field>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mid, #8A9C90)", marginTop: -4, marginBottom: 12, lineHeight: 1.6 }}>
+            <b>Customers at a time</b> is how many people you can have in the salon at once — a
+            booking that would put one more than this in the chair at any minute is refused. It
+            also can't book a stylist who is already busy, so whichever runs out first wins.
+            Opening and closing times come from <b>Working hours</b> above; to close a whole day,
+            block every stylist out for it in the diary and the link will offer nothing.
+          </div>
+          <Field label="A line for the customer (optional)">
+            <input className="input" value={draft.noticeText} maxLength={200} placeholder="e.g. Please arrive 5 minutes early" onChange={(e) => set("noticeText", e.target.value)} />
+          </Field>
+
+          <div style={{ background: "var(--surface-2, #F4FAF6)", border: "1px solid var(--tint-info-border, #CFE3D7)", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--brand)", marginBottom: 6 }}>Your booking link</div>
+            <input className="input" readOnly value={link} onFocus={(e) => e.target.select()} style={{ fontSize: 12.5, marginBottom: 8 }} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn small" onClick={copyLink}>Copy link</button>
+              <button className="btn small ghost" onClick={shareLink}>Share on WhatsApp</button>
+              <a className="btn small ghost" href={link} target="_blank" rel="noopener noreferrer">Open it</a>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn primary" onClick={save}>Save booking settings</button>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--text-mid, #8A9C90)", marginTop: 8, lineHeight: 1.6 }}>
+        A booking made on this link goes straight into the diary — nobody has to type it in. The
+        customer sees your shop name, address and directions, never a stylist's name, and the
+        stylist is chosen for them. <b>Anyone with the link can book</b>, and the number they give
+        isn't verified, so ring to confirm anything that looks odd — switching this off stops new
+        bookings immediately.
+      </div>
+    </section>
   );
 }
 

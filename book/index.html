@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#10331f" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#17111D" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%logo.svg" />
+    <!-- Deliberately NO <link rel="manifest">. The manifest installs the STAFF app: a customer
+         who booked once should not be prompted to add the salon's till to their home screen. -->
+    <title>Book an appointment</title>
+    <!-- Customers arrive from a link in a bio or a QR on the counter, so the page is indexable
+         but the salon's own name comes from the database, not from here. -->
+    <meta name="description" content="Book your next appointment online." />
+    <style>
+      * { margin: 0; box-sizing: border-box; }
+      html, body, #root { min-height: 100%; }
+      body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+      html, body { overflow-x: hidden; overscroll-behavior-x: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/book/main.jsx"></script>
+  </body>
+</html>
